@@ -7,9 +7,9 @@ Innovation Game on members' behalf, so security reports matter to us.
 
 Please report vulnerabilities privately rather than in a public issue. Use
 GitHub's private vulnerability reporting for this repository:
-[report a vulnerability](https://github.com/Daniel-T-S-Adams/community-pool/security/advisories/new).
+[report a vulnerability](https://github.com/tig-foundation/tig-community-pool/security/advisories/new).
 Reports about the member worker go to the
-[worker repository](https://github.com/Daniel-T-S-Adams/community-pool-worker/security/advisories/new)
+[worker repository](https://github.com/tig-foundation/tig-community-pool-worker/security/advisories/new)
 the same way.
 
 Include what you found, how to reproduce it, and what you believe the impact
@@ -22,7 +22,7 @@ it, and credit you when the fix is published unless you prefer otherwise.
   member funds, withdrawals, work assignment and settlement.
 - The operations tools under `tools/` and the deployment templates under
   `deploy/`.
-- The [member worker](https://github.com/Daniel-T-S-Adams/community-pool-worker), which
+- The [member worker](https://github.com/tig-foundation/tig-community-pool-worker), which
   lives in its own repository.
 
 Findings about a particular deployment's hosting, DNS or hardware belong to

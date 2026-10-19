@@ -9,7 +9,7 @@ and pays operator-reviewed withdrawals. Every movement of money is a balanced,
 append-only journal, and nothing is spent beyond an operator-recorded cap.
 
 The system is two repositories: this one, the pool, and the
-[member worker](https://github.com/Daniel-T-S-Adams/community-pool-worker),
+[member worker](https://github.com/tig-foundation/tig-community-pool-worker),
 which members install from the pool's Join page. A deployment is two hosts.
 The primary host serves the website and the member API and runs the
 coordinator and collectors; the recovery host keeps verified backups and
