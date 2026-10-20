@@ -12,6 +12,7 @@ from fastapi.testclient import TestClient
 from pool_manager.pool_v2.api import Settings,create_app
 from pool_manager.pool_v2 import releases
 from pool_manager.pool_v2.money import FundsError
+from pool_manager.pool_v2 import runtime_images
 from funds_helpers import DatabaseCase
 
 
@@ -23,7 +24,7 @@ def release_fixture(installer=INSTALLER):
         'pool':{'repository':releases.POOL_REPOSITORY,'commit':'a'*40,'tag':'v2-pool-fixture'},
         'worker':{'repository':releases.WORKER_REPOSITORY,'commit':'b'*40,'tag':'v2-worker-fixture','state_version':1,
             'installer_sha256':hashlib.sha256(installer).hexdigest()},
-        'runtime_images':{'c001':'ghcr.io/tig-foundation/tig-monorepo/satisfiability/runtime@sha256:'+'c'*64}}
+        'runtime_version':'0.0.8'}
 
 
 class ReleaseValidationTests(unittest.TestCase):
@@ -32,13 +33,15 @@ class ReleaseValidationTests(unittest.TestCase):
         self.assertEqual(releases.validate(manifest,'a'*40,INSTALLER),manifest)
         with self.assertRaises(ValueError):releases.validate(manifest,'d'*40,INSTALLER)
         with self.assertRaises(ValueError):releases.validate(manifest,'a'*40,INSTALLER+b'changed')
-        for change in ('repository','commit','tag','state','image'):
+        for change in ('repository','commit','tag','state','version','images'):
             invalid=deepcopy(manifest)
             if change=='repository':invalid['worker']['repository']='https://github.com/example/other-worker.git'
             elif change=='commit':invalid['worker']['commit']='main'
             elif change=='tag':invalid['worker']['tag']='../branch'
             elif change=='state':invalid['worker']['state_version']=2
-            else:invalid['runtime_images']['c001']='example:latest'
+            elif change=='version':invalid['runtime_version']='latest'
+            # The pool pins images itself; a manifest that still carries a hand-pinned map is stale.
+            else:invalid['runtime_images']={'c001':'ghcr.io/tig-foundation/tig-monorepo/satisfiability/runtime@sha256:'+'c'*64}
             with self.subTest(change=change),self.assertRaises(ValueError):releases.validate(invalid,'a'*40,INSTALLER)
 
     def test_install_commands_are_scoped_to_one_resource_and_quote_the_configured_origin(self):
@@ -58,13 +61,26 @@ class ReleaseApiTests(DatabaseCase):
 
     def test_public_metadata_and_download_match_without_enabling_work_or_funds(self):
         settings=self.settings();app=create_app(settings);client=TestClient(app)
-        expected=deepcopy(settings.release_manifest)
+        # The served release is the validated pair plus the images the pool has pinned so far: none yet.
+        expected={**deepcopy(settings.release_manifest),'runtime_images':{}}
         settings.release_manifest['worker']['commit']='c'*40
         self.assertEqual(client.get('/api/v2/release').json(),expected)
         capabilities=client.get('/api/v2/capabilities').json()
         self.assertFalse(capabilities['funds_enabled']);self.assertFalse(capabilities['work_enabled'])
         self.assertEqual(capabilities['pool_commit'],'a'*40)
         self.assertEqual(capabilities['release_digest'],hashlib.sha256(releases.canonical(expected).encode()).hexdigest())
+        self.assertEqual(capabilities['offered_challenges'],[])
+        image='ghcr.io/tig-foundation/tig-monorepo/satisfiability/runtime@sha256:'+'c'*64
+        runtime_images.record(self.db,'c001','satisfiability','0.0.8',image)
+        runtime_images.record(self.db,'c003','knapsack','0.0.9',image.replace('satisfiability','knapsack'))  # another version: not served
+        expected['runtime_images']={'c001':image}
+        self.assertEqual(client.get('/api/v2/release').json(),expected)
+        capabilities=client.get('/api/v2/capabilities').json()
+        self.assertEqual(capabilities['release_digest'],hashlib.sha256(releases.canonical(expected).encode()).hexdigest())
+        self.assertEqual(capabilities['offered_challenges'],['c001'])
+        listed=client.get('/api/v2/runtime-images').json()
+        self.assertEqual(listed['runtime_version'],'0.0.8')
+        self.assertEqual([(row['challenge_id'],row['challenge_name'],row['image']) for row in listed['images']],[('c001','satisfiability',image)])
         script=client.get('/api/v2/install-worker')
         self.assertEqual(script.content,INSTALLER)
         self.assertEqual(script.headers['content-disposition'],'attachment; filename="install_worker_v2.py"')
@@ -88,7 +104,7 @@ class ReleaseApiTests(DatabaseCase):
 
     def test_unreleased_pool_cannot_serve_an_installer_or_claim_a_pair(self):
         client=TestClient(create_app(replace(self.settings(),release_manifest=None,worker_installer=None,build_commit=None)))
-        for path in ('release','install-worker','worker-installation?resource=CPU&compute_type=aws_c7a'):
+        for path in ('release','runtime-images','install-worker','worker-installation?resource=CPU&compute_type=aws_c7a'):
             self.assertEqual(client.get('/api/v2/'+path).status_code,503)
         self.assertIsNone(client.get('/api/v2/capabilities').json()['release_digest'])
 
@@ -107,6 +123,6 @@ class ReleaseApiTests(DatabaseCase):
             response=client.get(path);self.assertEqual(response.status_code,200,response.text)
             return response.json()
         with patch.object(module,'fetch',side_effect=fetch):
-            self.assertEqual(module.release_from_pool(settings.origin),settings.release_manifest)
+            self.assertEqual(module.release_from_pool(settings.origin),{**settings.release_manifest,'runtime_images':{}})
         self.assertEqual(hashlib.sha256(client.get('/api/v2/install-worker').content).hexdigest(),
             settings.release_manifest['worker']['installer_sha256'])

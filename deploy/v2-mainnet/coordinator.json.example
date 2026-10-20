@@ -14,5 +14,6 @@
   "binary_reuse_seconds": 86400,
   "reference_max_age_seconds": 1800,
   "submission_timeout_seconds": 60,
-  "precommit_interval_seconds": 6
+  "precommit_interval_seconds": 6,
+  "runtime_image_refresh_seconds": 3600
 }

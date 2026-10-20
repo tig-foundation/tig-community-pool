@@ -105,7 +105,7 @@ def network_reference(database, *, now, max_age, refresh=None):
 
 
 def reserve_next(database, player_id, *, now, max_age=120, reference_max_age=1800, refresh_references=None,
-                 pinned_challenges=None):
+                 runtime_images=None):
     store = BlockStore(database)
     with database.transaction() as cursor:
         cursor.execute("SELECT id FROM observed_blocks ORDER BY height DESC LIMIT 1")
@@ -144,7 +144,7 @@ def reserve_next(database, player_id, *, now, max_age=120, reference_max_age=180
             try:
                 selection = choose(snapshot, observation["algorithms"]["binarys"], player_id=player_id,
                     resource=offer["resource"], compute_type=offer["compute_type"], now=now, max_age=max_age,
-                    reference_index=reference_index, reference_max_age=reference_max_age, pinned_challenges=pinned_challenges)
+                    reference_index=reference_index, reference_max_age=reference_max_age, runtime_images=runtime_images)
             except NoCompatibleWork:
                 continue
             # An unavailable member cannot prevent the next queued member from

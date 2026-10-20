@@ -42,7 +42,7 @@ jobs:
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           repository: tig-foundation/tig-community-pool-worker
-          ref: bda8f959ba874f9f208b7661029af412d9bddc79
+          ref: fe1b707e1843b1d07ac114929c66296b380ccb0f
           path: .paired-worker
           persist-credentials: false
       - name: Test protocol replay, funds concurrency and the paired worker API

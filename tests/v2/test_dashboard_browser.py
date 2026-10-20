@@ -17,7 +17,7 @@ from fastapi.testclient import TestClient
 from fastapi.responses import JSONResponse
 import uvicorn
 
-from pool_manager.pool_v2 import custody, deposits, funding, ledger, members
+from pool_manager.pool_v2 import custody, deposits, funding, ledger, members, runtime_images
 from pool_manager.pool_v2.api import Settings, create_app
 from pool_manager.pool_v2.chain import CustodyPreflight
 from pool_manager.pool_v2.money import TIG
@@ -205,6 +205,7 @@ class DashboardBrowserTests(DatabaseCase):
                 headers={'Authorization':'Bearer '+execution})
             self.assertEqual(result.status_code,401)
 
+        runtime_images.record(self.db,'c001','satisfiability','0.0.8','ghcr.io/tig-foundation/tig-monorepo/satisfiability/runtime@sha256:'+'c'*64)
         operator=context.new_page()
         operator.on('pageerror',lambda error:errors.append(str(error)))
         operator.goto(self.origin+'/operator')
@@ -212,9 +213,12 @@ class DashboardBrowserTests(DatabaseCase):
         operator.get_by_role('button',name='Open operator dashboard').click()
         expect(operator.locator('#operator-content')).to_be_visible()
         expect(operator.locator('#operator-token')).to_have_value('')
-        # Which challenges members receive follows the release's pinned runtime images; the page has no toggle.
+        # Which challenges members receive follows the images the pool pinned; the page lists them and has no toggle.
         expect(operator.locator('#offered-challenges')).to_have_count(0)
         self.assertNotIn('Offered challenges',operator.content())
+        expect(operator.locator('#runtime-images td').first).to_have_text('c001')
+        expect(operator.locator('#runtime-images')).to_contain_text('satisfiability')
+        expect(operator.locator('#runtime-images .mono').first).to_have_attribute('title','ghcr.io/tig-foundation/tig-monorepo/satisfiability/runtime@sha256:'+'c'*64)
         operator.locator('#unattributed-deposits').get_by_role('button',name='Operator funding',exact=True).click()
         operator.get_by_label('Ownership check').fill('Fixture operator source checked independently')
         operator.locator('#action-submit').click()

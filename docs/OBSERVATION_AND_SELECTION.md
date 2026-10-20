@@ -119,8 +119,8 @@ index. The pinned compute-type adapter supports the nine CPU verification types
 and `aws_g4dn` for GPU currently enumerated by TIG. Unknown or incompatible offers
 fail before reservation.
 
-It selects, among compatible challenges whose runtime image the served release
-pins, the one with the fewest pool qualifying bundles,
+It selects, among compatible challenges whose official runtime image the pool
+has pinned, the one with the fewest pool qualifying bundles,
 breaks ties uniformly, then selects its usable algorithm with the highest exact
 overall adoption. For each active track it copies the hyperparameters of that
 algorithm's highest-scoring active bundle, taken from the benchmark that produced

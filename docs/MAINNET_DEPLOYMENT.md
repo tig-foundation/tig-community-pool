@@ -128,7 +128,9 @@ final test.
    not policy mutation rights. Public fee collection also needs INSERT on the
    immutable `protocol_identity` row; apply
    [the observer grant](../deploy/v2-mainnet/grant-runtime-observer-privileges.sql).
-   Verify privileges before enabling any API action.
+   Migration 029 grants its own `runtime_images` table to these roles when they
+   exist, so that grant file is unchanged by it. Verify privileges before
+   enabling any API action.
 3. Create a dedicated `innopoolmainnet` Unix account. Keep reviewed settings in
    `/etc/innopool-v2-mainnet` and persistent spools in
    `/var/lib/innopool-v2-mainnet/spool`. Keep credentials outside repositories,

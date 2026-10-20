@@ -67,20 +67,31 @@ addresses identify the member allocations displayed for review. Finalizing a
 benchmark's collateral still requires authoritative outcome and post-X+2
 arbitration evidence. The operator cannot bypass these checks from the screen.
 
-## Offered challenges
+## Runtime images
 
 Which challenges members receive is not an operator setting. Within an offered
-resource the pool hands out every active challenge whose runtime image is pinned
-in the served release manifest; a challenge without a pinned image is never
-selected, because members' workers run only the pinned images. The coordinator
-reads the manifest named by `release_manifest_file` in its configuration and
-refuses to start new work without it. Each reservation's evidence records
-`pinned_challenges` and `excluded_challenges`, and the public capabilities
-route reports the pinned ids as `offered_challenges`. Adding or removing a
-challenge means pinning or dropping its image in a paired release. The
-per-challenge operator toggle introduced with migration 028 was removed on
-20 October 2026; the widened runtime-control names stay in the schema and any
-recorded `offer:<id>` rows are inert history.
+resource the pool hands out every active challenge whose official runtime image
+it has pinned; a challenge without a pinned image is never selected, because
+members' workers run only a pinned official image. The coordinator pins the
+images itself: it reads `runtime_version` from the manifest named by
+`release_manifest_file` in its configuration (new work refuses to start without
+it), takes each active challenge's name from TIG's challenge configuration in
+the newest complete snapshot, asks the registry which content digest that
+runtime tag names, and appends the result to the `runtime_images` table
+(migration 029) whenever it changes. It asks again every
+`runtime_image_refresh_seconds` (default 3600). Each assignment carries the
+image for its challenge as `runtime_image`; members pull it themselves and the
+pool downloads nothing. The operator page lists the current pins read-only,
+`GET /api/v2/runtime-images` serves them with challenge names and resolution
+times, the served release carries the same map as `runtime_images`, and the
+public capabilities route reports the ids as `offered_challenges`. Each
+reservation's evidence records `pinned_challenges`, `excluded_challenges` and
+`runtime_image`. A challenge TIG adds is offered as soon as its image is
+published at the recorded runtime version; moving to a new TIG runtime means
+changing `runtime_version` in a release. The per-challenge operator toggle
+introduced with migration 028 was removed on 20 October 2026; the widened
+runtime-control names stay in the schema and any recorded `offer:<id>` rows
+are inert history.
 
 ## Pausing new work
 
