@@ -43,17 +43,19 @@ class SubmissionTests(DatabaseCase):
         store = BlockStore(self.db)
         store.initialize(8); store.record(self.obs, collector="fixture")
 
-    def test_operator_offered_challenges_restrict_reservations(self):
+    def test_unpinned_challenges_are_never_reserved(self):
         now=self.obs["start"]["block"]["details"]["timestamp"]
-        work_requests.create(self.db,self.member,"restricted",resource="CPU",compute_type="aws_c7a",capacity={"workers":1},ttl_seconds=600)
-        controls.set_offered_challenges(self.db,["c2"],actor="operator",reason="GPU only",event_key="offer-gpu")
-        self.assertIsNone(work_requests.reserve_next(self.db,self.player,now=now))
-        self.assertEqual(self.row("SELECT state FROM work_requests WHERE request_key='restricted'")["state"],"queued")
-        controls.set_offered_challenges(self.db,["c1","c2"],actor="operator",reason="knapsack timed",event_key="offer-cpu")
-        row=work_requests.reserve_next(self.db,self.player,now=now)
+        work_requests.create(self.db,self.member,"pinned",resource="CPU",compute_type="aws_c7a",capacity={"workers":1},ttl_seconds=600)
+        # c1 is the only CPU challenge in this fixture: a release pinning only c2 offers CPU members nothing.
+        self.assertIsNone(work_requests.reserve_next(self.db,self.player,now=now,pinned_challenges=["c2"]))
+        self.assertEqual(self.row("SELECT state FROM work_requests WHERE request_key='pinned'")["state"],"queued")
+        row=work_requests.reserve_next(self.db,self.player,now=now,pinned_challenges=["c1","c2"])
         self.assertEqual(row["selection"]["selected_challenge"],"c1")
-        self.assertEqual(row["selection"]["offered_challenges"],["c1","c2"])
+        self.assertEqual(row["selection"]["pinned_challenges"],["c1","c2"])
         self.assertEqual(row["selection"]["excluded_challenges"],[])
+        for pinned in ([],["c1",1],"c1"):
+            with self.assertRaises(ValueError):
+                Coordinator(self.db,self.player,Mock(),Mock(enabled=True),new_work=True,pinned_challenges=pinned)
 
     def queued(self, key="first", member=None, ttl_seconds=60, legacy=False):
         work_requests.create(self.db, member or self.member, key, resource="CPU", compute_type="aws_c7a",

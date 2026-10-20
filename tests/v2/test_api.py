@@ -111,38 +111,20 @@ class ApiTests(DatabaseCase):
         self.assertFalse(self.client.get('/api/v2/capabilities').json()['work_enabled'])
         self.assertEqual(self.row('SELECT count(*) AS n FROM runtime_control_events')['n'],2)
 
-    def test_operator_offered_challenges_are_audited_published_and_limited_to_pinned_images(self):
+    def test_capabilities_publish_the_pinned_challenges_and_no_operator_challenge_control_exists(self):
         from test_releases import INSTALLER, release_fixture
         settings=Settings(self.db.dsn,"https://pool.example",8453,self.settings.operator_token_sha256,funds_enabled=True,
                           release_manifest=release_fixture(),build_commit='a'*40,worker_installer=INSTALLER)
         client=TestClient(create_app(settings))
         operator={'Authorization':'Bearer '+self.operator}
-        path='/api/v2/operator/controls/offered-challenges'
-        self.assertIsNone(client.get('/api/v2/capabilities').json()['offered_challenges'])
-        catalogue=client.get('/api/v2/operator/challenges',headers=operator).json()
-        self.assertFalse(catalogue['restricted'])
-        self.assertEqual([(row['id'],row['name'],row['runtime_image'],row['offered']) for row in catalogue['challenges']],
-                         [('c001','satisfiability',True,None)])
-        self.assertEqual(client.get('/api/v2/operator/challenges',headers=self.headers).status_code,403)
-        self.assertEqual(client.post(path,json={'challenges':['c001'],'reason':'timed','event_key':'offer-1'},headers=self.headers).status_code,403)
-        self.assertEqual(client.post(path,json={'challenges':['c002'],'reason':'timed','event_key':'offer-1'},headers=operator).status_code,400)
-        self.assertEqual(client.post(path,json={'challenges':['C001'],'reason':'timed','event_key':'offer-1'},headers=operator).status_code,400)
-        self.assertEqual(client.post(path,json={'challenges':['c001','c001'],'reason':'timed','event_key':'offer-1'},headers=operator).status_code,400)
-        self.assertEqual(client.post(path,json={'challenges':'c001','reason':'timed','event_key':'offer-1'},headers=operator).status_code,422)
-        result=client.post(path,json={'challenges':['c001'],'reason':'timed','event_key':'offer-1'},headers=operator)
-        self.assertEqual(result.status_code,200,result.text)
-        self.assertEqual(result.json()['offered'],['c001'])
+        # Members receive every active challenge whose runtime image the served release pins, and nothing else;
+        # the operator has no per-challenge toggle.
         self.assertEqual(client.get('/api/v2/capabilities').json()['offered_challenges'],['c001'])
-        # Replaying the same event is idempotent; the same key with another list is refused.
-        replay=client.post(path,json={'challenges':['c001'],'reason':'timed','event_key':'offer-1'},headers=operator).json()
-        self.assertEqual((replay['offered'],replay['replayed']),(['c001'],True))
-        self.assertFalse(result.json()['replayed'])
-        self.assertEqual(client.post(path,json={'challenges':[],'reason':'timed','event_key':'offer-1'},headers=operator).status_code,409)
-        self.assertEqual(client.post(path,json={'challenges':[],'reason':'stop','event_key':'offer-2'},headers=operator).json()['offered'],[])
-        self.assertEqual(client.get('/api/v2/capabilities').json()['offered_challenges'],[])
-        catalogue=client.get('/api/v2/operator/challenges',headers=operator).json()
-        self.assertTrue(catalogue['restricted']);self.assertFalse(catalogue['challenges'][0]['offered'])
-        self.assertEqual(self.row("SELECT count(*) AS n FROM runtime_control_events WHERE name='offer:c001'")['n'],2)
+        self.assertIsNone(self.client.get('/api/v2/capabilities').json()['offered_challenges'])
+        self.assertEqual(client.get('/api/v2/operator/challenges',headers=operator).status_code,404)
+        self.assertEqual(client.post('/api/v2/operator/controls/offered-challenges',
+            json={'challenges':['c001'],'reason':'timed','event_key':'offer-1'},headers=operator).status_code,404)
+        self.assertEqual(self.row("SELECT count(*) AS n FROM runtime_controls WHERE name LIKE 'offer:%%'")['n'],0)
 
     def test_static_screens_are_public_but_actions_require_their_own_authority(self):
         for path in ('/','/join','/operator'):

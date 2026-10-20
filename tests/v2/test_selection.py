@@ -86,23 +86,23 @@ class SelectionTests(unittest.TestCase):
         self.assertEqual(draw.options[0], ["c1", "c2"])
         self.assertEqual(result.payload["settings"]["challenge_id"], "c2")
 
-    def test_operator_offered_list_filters_candidates_and_is_recorded(self):
+    def test_pinned_runtime_images_filter_candidates_and_are_recorded(self):
         data = observation()
         unrestricted = self.select(data)
-        self.assertIsNone(unrestricted.evidence["offered_challenges"])
+        self.assertIsNone(unrestricted.evidence["pinned_challenges"])
         self.assertEqual(unrestricted.evidence["excluded_challenges"], [])
-        limited = self.select(data, offered_challenges=["c1"])
+        limited = self.select(data, pinned_challenges=["c1"])
         self.assertEqual(limited.payload["settings"]["challenge_id"], "c1")
-        self.assertEqual(limited.evidence["offered_challenges"], ["c1"])
+        self.assertEqual(limited.evidence["pinned_challenges"], ["c1"])
         self.assertEqual(limited.evidence["excluded_challenges"], ["c2"])
-        self.assertEqual(self.select(data, offered_challenges=["c1", "c2", "g1"]).payload["settings"]["challenge_id"],
+        self.assertEqual(self.select(data, pinned_challenges=["c1", "c2", "g1"]).payload["settings"]["challenge_id"],
                          unrestricted.payload["settings"]["challenge_id"])
         with self.assertRaises(NoCompatibleWork):
-            self.select(data, offered_challenges=[])
+            self.select(data, pinned_challenges=[])
         with self.assertRaises(NoCompatibleWork):
-            self.select(data, "GPU", offered_challenges=["c1"])
+            self.select(data, "GPU", pinned_challenges=["c1"])
         with self.assertRaises(ProtocolDataError):
-            self.select(data, offered_challenges=[1])
+            self.select(data, pinned_challenges=[1])
 
     def test_live_recorded_snapshot_selects_cpu_and_gpu_with_exact_references(self):
         data = read_archive(next((Path(__file__).parent / "fixtures").glob("block-1351111*")))["observation"]

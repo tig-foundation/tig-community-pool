@@ -140,6 +140,8 @@ python3 tools/run_tig_v2.py --config /absolute/path/coordinator.json
 `submission_timeout_seconds` (default 20) bounds each TIG write; a longer value
 only reduces lost responses, because the send fence does not depend on it.
 `precommit_interval_seconds` (default 6, 0 disables) spaces precommit sends.
+`release_manifest_file` names the served release manifest; new work requires it,
+and selection offers members only challenges whose runtime image it pins.
 The JSON file includes `tig_api_url`, `pool_player_id`, `public_origin` (the
 member API's HTTPS origin), `submissions_enabled` and `new_work_enabled`.
 Both boolean flags default to false. Enabling new work requires enabled

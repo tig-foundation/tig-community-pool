@@ -69,22 +69,18 @@ arbitration evidence. The operator cannot bypass these checks from the screen.
 
 ## Offered challenges
 
-`GET /api/v2/operator/challenges` lists every challenge the operator can
-decide about: those with a runtime image pinned in the served release and those
-present in the latest observed block, with their resource family, active track
-count and whether they are currently offered. `POST
-/api/v2/operator/controls/offered-challenges` takes `challenges`, `reason` and
-an `event_key` and records one audited control per challenge, named
-`offer:<id>`, under the protocol-budget lock that reservations also take.
-Replaying the same event is idempotent; the same key with another list is
-refused. Migration 028 widens the runtime control tables for these names.
-
-Until a list is saved the pool offers every active challenge of the offered
-resources. After that, selection skips unlisted challenges and records
-`offered_challenges` and `excluded_challenges` in the reservation evidence. The
-public capabilities route reports the saved list. The operator page shows the
-list as tick boxes grouped by resource; a challenge without a pinned runtime
-image, or of a resource the deployment does not offer, cannot be ticked.
+Which challenges members receive is not an operator setting. Within an offered
+resource the pool hands out every active challenge whose runtime image is pinned
+in the served release manifest; a challenge without a pinned image is never
+selected, because members' workers run only the pinned images. The coordinator
+reads the manifest named by `release_manifest_file` in its configuration and
+refuses to start new work without it. Each reservation's evidence records
+`pinned_challenges` and `excluded_challenges`, and the public capabilities
+route reports the pinned ids as `offered_challenges`. Adding or removing a
+challenge means pinning or dropping its image in a paired release. The
+per-challenge operator toggle introduced with migration 028 was removed on
+20 October 2026; the widened runtime-control names stay in the schema and any
+recorded `offer:<id>` rows are inert history.
 
 ## Pausing new work
 
