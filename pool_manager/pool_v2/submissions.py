@@ -13,7 +13,7 @@ from urllib.parse import urlsplit
 from psycopg2 import IntegrityError
 from psycopg2.extras import Json
 
-from . import benchmarks, ledger
+from . import benchmarks, ledger, runtime_images
 from .block_observer import BlockStore
 from .database import lock
 from .money import Conflict, FundsError
@@ -337,11 +337,15 @@ def publish_assignment(database, reservation_id, precommit, *, evidence, artifac
         if origin.scheme != "https" or not origin.netloc or origin.username or origin.password or origin.path not in ("","/") or origin.query or origin.fragment:
             raise FundsError("artifact serving requires the configured HTTPS pool origin")
     with database.transaction() as cursor:
-        cursor.execute("SELECT payload_text FROM reservations WHERE id=%s", (reservation_id,))
+        cursor.execute("SELECT payload_text, selection FROM reservations WHERE id=%s", (reservation_id,))
         row = cursor.fetchone()
         if not row or not row["payload_text"]:
             raise FundsError("unknown serialized reservation")
         payload = json.loads(row["payload_text"])
+        pinned = (row["selection"] or {}).get("runtime_image")
+    # The image pinned when the work was selected; a reservation made before the
+    # pool pinned images falls back to the newest record for its challenge.
+    image = pinned or runtime_images.latest(database, payload["settings"]["challenge_id"])
     _, snapshot = BlockStore(database).read(payload["settings"]["block_id"])
     try:
         if not matches(payload, precommit):
@@ -380,6 +384,8 @@ def publish_assignment(database, reservation_id, precommit, *, evidence, artifac
             **{key: details[key] for key in ("rand_hash", "num_nonces", "num_bundles", "fuel_budget", "hyperparameters", "compute_type")},
             "binary_url": archive["source_url"] if archive["direct"] or not artifact_origin else artifact_origin.rstrip('/')+'/api/v2/artifacts/'+archive["sha256"],
             "binary_sha256": archive["sha256"]}
+        if image is not None:
+            assignment["runtime_image"] = image
         return benchmarks.accept(database, reservation_id, benchmark_id, assignment, actual_fee=fee,
                                  evidence=evidence, _cursor=cursor)
 

@@ -113,14 +113,20 @@ class ApiTests(DatabaseCase):
 
     def test_capabilities_publish_the_pinned_challenges_and_no_operator_challenge_control_exists(self):
         from test_releases import INSTALLER, release_fixture
+        from pool_manager.pool_v2 import runtime_images
         settings=Settings(self.db.dsn,"https://pool.example",8453,self.settings.operator_token_sha256,funds_enabled=True,
                           release_manifest=release_fixture(),build_commit='a'*40,worker_installer=INSTALLER)
         client=TestClient(create_app(settings))
         operator={'Authorization':'Bearer '+self.operator}
-        # Members receive every active challenge whose runtime image the served release pins, and nothing else;
-        # the operator has no per-challenge toggle.
+        # Members receive every active challenge whose official runtime image the pool has pinned, and nothing
+        # else; the operator has no per-challenge toggle. Nothing is pinned until the coordinator resolves it.
+        self.assertEqual(client.get('/api/v2/capabilities').json()['offered_challenges'],[])
+        image='ghcr.io/tig-foundation/tig-monorepo/satisfiability/runtime@sha256:'+'c'*64
+        runtime_images.record(self.db,'c001','satisfiability','0.0.8',image)
         self.assertEqual(client.get('/api/v2/capabilities').json()['offered_challenges'],['c001'])
+        self.assertEqual(client.get('/api/v2/release').json()['runtime_images'],{'c001':image})
         self.assertIsNone(self.client.get('/api/v2/capabilities').json()['offered_challenges'])
+        self.assertEqual(self.client.get('/api/v2/runtime-images').status_code,503)
         self.assertEqual(client.get('/api/v2/operator/challenges',headers=operator).status_code,404)
         self.assertEqual(client.post('/api/v2/operator/controls/offered-challenges',
             json={'challenges':['c001'],'reason':'timed','event_key':'offer-1'},headers=operator).status_code,404)

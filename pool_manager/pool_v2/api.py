@@ -19,7 +19,7 @@ from .database import Database
 from .chain import Chain, Network, Rpc, FEE_MODELS, UnsupportedCustodyTransaction
 from . import members, withdrawals, work_requests, member_protocol, benchmarks
 from . import artifacts, native_funding, sponsored_withdrawals
-from . import controls,custody,dashboard,deposits,settlement,chain_observer,funding,topups,releases,spending
+from . import controls,custody,dashboard,deposits,settlement,chain_observer,funding,topups,releases,runtime_images,spending
 from .protocol import ProtocolDataError
 from .money import Conflict, FundsError, InsufficientFunds
 from .frontend import Frontend, https_origin
@@ -175,7 +175,6 @@ def create_app(settings):
     website_origin = https_origin(settings.origin)
     api_origin = https_origin(settings.api_origin if settings.api_origin is not None else website_origin)
     release=releases.validate(settings.release_manifest,settings.build_commit,settings.worker_installer)
-    release_digest=hashlib.sha256(releases.canonical(release).encode()).hexdigest() if release else None
     if len(settings.operator_token_sha256) != 64:
         raise ValueError("operator token SHA-256 must be configured explicitly")
     if settings.work_enabled:
@@ -183,6 +182,12 @@ def create_app(settings):
             raise ValueError("work requires explicit member-funds and pool-account configuration")
         members.address(settings.pool_player_id)
     database = Database(settings.database_dsn)
+    def served_release():
+        """The validated pair plus the official images the pool currently pins at its runtime version."""
+        if release is None:return None
+        return {**release,'runtime_images':runtime_images.current(database,release['runtime_version'])}
+    def release_digest(served):
+        return None if served is None else hashlib.sha256(releases.canonical(served).encode()).hexdigest()
     payment_chain = None
     if any(value is not None for value in (settings.custody_network, settings.custody_rpc_url, settings.withdrawal_fee_model)):
         if (not settings.custody_network or not settings.custody_rpc_url
@@ -291,24 +296,31 @@ def create_app(settings):
     def capabilities():
         paused=controls.paused(database)
         blocked=controls.blocked(database)
+        served=served_release()
         return response({"api_version": API_VERSION, "funds_enabled": settings.funds_enabled,
                          "work_enabled": settings.work_enabled and not blocked,"new_work_paused":paused,
                          "work_block_reason":blocked,
                          "work_configured":settings.work_enabled,"settlement_enabled":settings.settlement_enabled,
                          "chain_id":settings.chain_id,"origin":website_origin,"api_origin":api_origin,
-                         "release_digest":release_digest,"pool_commit":release['pool']['commit'] if release else None,
+                         "release_digest":release_digest(served),"pool_commit":release['pool']['commit'] if release else None,
                          "custody":settings.custody_network.custody if settings.custody_network else None,
                          "token":settings.custody_network.token if settings.custody_network else None,
                          "assignment_unit": "whole-benchmark", "offered_resources": list(offered),
-                         "offered_challenges": sorted(release['runtime_images']) if release else None})
+                         "offered_challenges": sorted(served['runtime_images']) if served else None})
 
     def recorded_release():
-        if release is None:raise HTTPException(503,'a verified paired release has not been configured')
-        return release
+        served=served_release()
+        if served is None:raise HTTPException(503,'a verified paired release has not been configured')
+        return served
 
     @app.get('/api/v2/release')
     def paired_release():
         return response(recorded_release())
+
+    @app.get('/api/v2/runtime-images')
+    def pinned_runtime_images():
+        recorded_release()
+        return response({'runtime_version':release['runtime_version'],'images':runtime_images.rows(database,release['runtime_version'])})
 
     @app.get('/api/v2/install-worker')
     def installer_download():

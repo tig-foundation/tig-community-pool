@@ -12,8 +12,11 @@ capabilities route reports `api_version`, `assignment_unit: whole-benchmark`,
 whether new work is enabled and `offered_resources`, the resources the operator
 has validated on this pool (`CPU` alone until GPU execution is validated there); a
 work request for a resource that is not offered is refused with 409. It also
-reports `offered_challenges`: the challenge ids this pool can hand out, those whose
-runtime image the served release pins, or `null` while no release is configured. Amounts exposed to clients use decimal strings
+reports `offered_challenges`: the challenge ids this pool can hand out, those for
+which the pool has pinned an official runtime image at its recorded TIG runtime
+version, or `null` while no release is configured. `GET /api/v2/runtime-images`
+lists those pins with each challenge's name and resolution time, and
+`GET /api/v2/release` carries the same map as `runtime_images`. Amounts exposed to clients use decimal strings
 of token base units, with 18 decimal places per TIG.
 
 ## Work request
@@ -64,7 +67,9 @@ because a worker lease or HTTP timeout elapsed.
 - `assignment_payload`: the **exact JSON string**, containing API version,
   benchmark ID, all TIG settings, random hash, nonce/bundle counts, fuel budget,
   compute type, hyperparameters (including explicit null), algorithm name, archive
-  URL and its SHA-256.
+  URL and its SHA-256, and `runtime_image`: the official challenge runtime the
+  pool pinned for this work, as `ghcr.io/tig-foundation/tig-monorepo/<challenge
+  name>/runtime@sha256:<digest>`. Run the benchmark in exactly that image.
 - `assignment_digest`: SHA-256 of `assignment_payload.encode('utf-8')`.
 - `sampled_nonces`: null until TIG supplies the authoritative list.
 

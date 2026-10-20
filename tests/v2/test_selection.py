@@ -88,21 +88,26 @@ class SelectionTests(unittest.TestCase):
 
     def test_pinned_runtime_images_filter_candidates_and_are_recorded(self):
         data = observation()
+        image = lambda name: "ghcr.io/tig-foundation/tig-monorepo/" + name + "/runtime@sha256:" + "a" * 64
         unrestricted = self.select(data)
         self.assertIsNone(unrestricted.evidence["pinned_challenges"])
+        self.assertIsNone(unrestricted.evidence["runtime_image"])
         self.assertEqual(unrestricted.evidence["excluded_challenges"], [])
-        limited = self.select(data, pinned_challenges=["c1"])
+        limited = self.select(data, runtime_images={"c1": image("one")})
         self.assertEqual(limited.payload["settings"]["challenge_id"], "c1")
         self.assertEqual(limited.evidence["pinned_challenges"], ["c1"])
+        self.assertEqual(limited.evidence["runtime_image"], image("one"))
         self.assertEqual(limited.evidence["excluded_challenges"], ["c2"])
-        self.assertEqual(self.select(data, pinned_challenges=["c1", "c2", "g1"]).payload["settings"]["challenge_id"],
+        everything = {"c1": image("one"), "c2": image("two"), "g1": image("gpu")}
+        self.assertEqual(self.select(data, runtime_images=everything).payload["settings"]["challenge_id"],
                          unrestricted.payload["settings"]["challenge_id"])
         with self.assertRaises(NoCompatibleWork):
-            self.select(data, pinned_challenges=[])
+            self.select(data, runtime_images={})
         with self.assertRaises(NoCompatibleWork):
-            self.select(data, "GPU", pinned_challenges=["c1"])
-        with self.assertRaises(ProtocolDataError):
-            self.select(data, pinned_challenges=[1])
+            self.select(data, "GPU", runtime_images={"c1": image("one")})
+        for invalid in (["c1"], {"c1": "ghcr.io/tig-foundation/tig-monorepo/one/runtime:0.0.8"}, {1: image("one")}):
+            with self.subTest(invalid=invalid), self.assertRaises(ProtocolDataError):
+                self.select(data, runtime_images=invalid)
 
     def test_live_recorded_snapshot_selects_cpu_and_gpu_with_exact_references(self):
         data = read_archive(next((Path(__file__).parent / "fixtures").glob("block-1351111*")))["observation"]

@@ -6,6 +6,7 @@ import secrets
 
 from .money import collateral
 from .protocol import ProtocolDataError, Snapshot, _index, _integer, _text
+from .runtime_images import check_images
 
 
 COMPUTE_FAMILIES = {
@@ -68,29 +69,27 @@ def _precise(value, label):
 
 def choose(snapshot, binary_rows, *, player_id, resource, compute_type, now,
            max_age=120, fuel_budget=None, rng=None, reference_index=None, reference_max_age=1800,
-           pinned_challenges=None):
+           runtime_images=None):
     try:
         return _choose(snapshot, binary_rows, player_id=player_id, resource=resource,
             compute_type=compute_type, now=now, max_age=max_age, fuel_budget=fuel_budget,
             rng=rng, reference_index=reference_index, reference_max_age=reference_max_age,
-            pinned_challenges=pinned_challenges)
+            runtime_images=runtime_images)
     except (KeyError, TypeError, AttributeError) as exc:
         raise ProtocolDataError(f"incomplete selection data: {exc}") from exc
 
 
 def _choose(snapshot, binary_rows, *, player_id, resource, compute_type, now,
-            max_age, fuel_budget, rng, reference_index, reference_max_age, pinned_challenges):
+            max_age, fuel_budget, rng, reference_index, reference_max_age, runtime_images):
     if not isinstance(snapshot, Snapshot):
         raise ProtocolDataError("selection requires a validated snapshot")
     if snapshot.scoped and reference_index is None:
         raise ProtocolDataError("a pool-scoped snapshot needs a whole-network reference for selection")
     if resource not in ("CPU", "GPU") or COMPUTE_FAMILIES.get(compute_type) != resource:
         raise NoCompatibleWork("offer must declare one compatible CPU/GPU verification compute type")
-    if pinned_challenges is not None and (not isinstance(pinned_challenges, (list, tuple, set, frozenset))
-            or any(type(item) is not str for item in pinned_challenges)):
-        raise ProtocolDataError("pinned challenge list must name challenge ids")
-    # Members' workers run only the runtime images the served release pins, one per challenge.
-    pinned = None if pinned_challenges is None else frozenset(pinned_challenges)
+    # Members' workers run a challenge only inside the official image the pool
+    # pinned for it, so a challenge without a pinned image is never handed out.
+    images = None if runtime_images is None else check_images(runtime_images)
     excluded = []
     _integer(now, "current timestamp")
     _integer(max_age, "maximum snapshot age", 1)
@@ -106,7 +105,7 @@ def _choose(snapshot, binary_rows, *, player_id, resource, compute_type, now,
             raise ProtocolDataError("unknown challenge resource family")
         if family.upper() != resource:
             continue
-        if pinned is not None and challenge_id not in pinned:
+        if images is not None and challenge_id not in images:
             excluded.append(challenge_id)
             continue
         if _integer(challenge["state"]["round_active"], "challenge activation", 1) > snapshot.round:
@@ -198,7 +197,8 @@ def _choose(snapshot, binary_rows, *, player_id, resource, compute_type, now,
         "hyperparameter_policy": "copy-best-active-bundle-v2", "references": reference_evidence,
         "block_id": snapshot.block_id,
         "height": snapshot.height, "round": snapshot.round, "resource": resource,
-        "compute_type": compute_type, "pinned_challenges": None if pinned is None else sorted(pinned),
+        "compute_type": compute_type, "pinned_challenges": None if images is None else sorted(images),
+        "runtime_image": None if images is None else images[challenge_id],
         "excluded_challenges": sorted(excluded), "pool_counts": pool_counts, "challenge_ties": challenge_ties,
         "selected_challenge": challenge_id, "adoption_units": {key: str(value) for key, value in adoptions.items()},
         "algorithm_ties": algorithm_ties, "selected_algorithm": algorithm_id,

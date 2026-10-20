@@ -34,12 +34,10 @@ def validate(manifest,build_commit,installer):
             raise ValueError('the paired installer bytes must be provided explicitly')
         digest=hashlib.sha256(installer).hexdigest()
         if value['worker']['installer_sha256']!=digest:raise ValueError('installer checksum differs from its paired worker release')
-        images=value['runtime_images']
-        if not isinstance(images,dict) or not images:raise ValueError('recorded runtime image digests are required')
-        for challenge,image in images.items():
-            if not re.fullmatch(r'c[0-9]+',challenge) or not re.fullmatch(
-                r'ghcr\.io/tig-foundation/tig-monorepo/[a-z_]+/runtime@sha256:[0-9a-f]{64}',image):
-                raise ValueError('runtime images must be explicit official digests')
+        if not isinstance(value['runtime_version'],str) or not re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+',value['runtime_version']):
+            raise ValueError('the TIG runtime version whose official images the pool pins is required')
+        if 'runtime_images' in value:
+            raise ValueError('runtime images are pinned by the pool from the active challenges; remove them from the release manifest')
         return value
     except (KeyError,TypeError) as error:raise ValueError('paired release metadata is incomplete or malformed') from error
 

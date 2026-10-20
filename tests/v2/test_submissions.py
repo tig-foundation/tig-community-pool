@@ -45,17 +45,43 @@ class SubmissionTests(DatabaseCase):
 
     def test_unpinned_challenges_are_never_reserved(self):
         now=self.obs["start"]["block"]["details"]["timestamp"]
+        image=lambda name:"ghcr.io/tig-foundation/tig-monorepo/"+name+"/runtime@sha256:"+"a"*64
         work_requests.create(self.db,self.member,"pinned",resource="CPU",compute_type="aws_c7a",capacity={"workers":1},ttl_seconds=600)
-        # c1 is the only CPU challenge in this fixture: a release pinning only c2 offers CPU members nothing.
-        self.assertIsNone(work_requests.reserve_next(self.db,self.player,now=now,pinned_challenges=["c2"]))
+        # c1 is the only CPU challenge in this fixture: with only c2 pinned, CPU members get nothing.
+        self.assertIsNone(work_requests.reserve_next(self.db,self.player,now=now,runtime_images={"c2":image("two")}))
         self.assertEqual(self.row("SELECT state FROM work_requests WHERE request_key='pinned'")["state"],"queued")
-        row=work_requests.reserve_next(self.db,self.player,now=now,pinned_challenges=["c1","c2"])
+        row=work_requests.reserve_next(self.db,self.player,now=now,runtime_images={"c1":image("one"),"c2":image("two")})
         self.assertEqual(row["selection"]["selected_challenge"],"c1")
         self.assertEqual(row["selection"]["pinned_challenges"],["c1","c2"])
+        self.assertEqual(row["selection"]["runtime_image"],image("one"))
         self.assertEqual(row["selection"]["excluded_challenges"],[])
-        for pinned in ([],["c1",1],"c1"):
-            with self.assertRaises(ValueError):
-                Coordinator(self.db,self.player,Mock(),Mock(enabled=True),new_work=True,pinned_challenges=pinned)
+        # The accepted assignment carries the image pinned at selection; the member's worker runs nothing else.
+        submissions.prepare_archive(self.db,row["id"],row["selection"]["binary"]["details"]["download_url"],b"recorded-archive-fixture")
+        intent=self.row("SELECT id FROM protocol_outbox WHERE reservation_id=%s AND kind='precommit'",(row["id"],))
+        submissions.begin(self.db,intent["id"],preflight=self.preflight())
+        submissions.record_response(self.db,intent["id"],{"status":200,"body":{"benchmark_id":"b"*32}})
+        published=submissions.publish_assignment(self.db,row["id"],self.precommit(row),evidence={"block":9})
+        self.assertEqual(published["assignment"]["runtime_image"],image("one"))
+        for invalid in ([],"c1",{"c1":image("one")},Mock(spec=[])):
+            with self.subTest(invalid=invalid),self.assertRaises(ValueError):
+                Coordinator(self.db,self.player,Mock(),Mock(enabled=True),new_work=True,runtime_images=invalid)
+
+    def test_older_reservations_receive_the_newest_pinned_image_or_none(self):
+        from pool_manager.pool_v2 import runtime_images
+        image="ghcr.io/tig-foundation/tig-monorepo/one/runtime@sha256:"+"c"*64
+        # Reserved before the pool pinned anything: the assignment names no image.
+        row,intent=self.queued()
+        submissions.begin(self.db,intent["id"],preflight=self.preflight())
+        submissions.record_response(self.db,intent["id"],{"status":200,"body":{"benchmark_id":"b"*32}})
+        self.assertIsNone(row["selection"]["runtime_image"])
+        self.assertNotIn("runtime_image",submissions.publish_assignment(self.db,row["id"],self.precommit(row),evidence={"block":9})["assignment"])
+        # Reserved before, accepted after: the newest record for its challenge is used.
+        row,intent=self.queued(key="second")
+        submissions.begin(self.db,intent["id"],preflight=self.preflight())
+        submissions.record_response(self.db,intent["id"],{"status":200,"body":{"benchmark_id":"d"*32}})
+        runtime_images.record(self.db,"c1","one","0.0.8",image)
+        published=submissions.publish_assignment(self.db,row["id"],self.precommit(row,identity="d"*32),evidence={"block":9})
+        self.assertEqual(published["assignment"]["runtime_image"],image)
 
     def queued(self, key="first", member=None, ttl_seconds=60, legacy=False):
         work_requests.create(self.db, member or self.member, key, resource="CPU", compute_type="aws_c7a",

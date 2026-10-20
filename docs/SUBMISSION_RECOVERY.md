@@ -141,7 +141,10 @@ python3 tools/run_tig_v2.py --config /absolute/path/coordinator.json
 only reduces lost responses, because the send fence does not depend on it.
 `precommit_interval_seconds` (default 6, 0 disables) spaces precommit sends.
 `release_manifest_file` names the served release manifest; new work requires it,
-and selection offers members only challenges whose runtime image it pins.
+because the coordinator pins each active challenge's official runtime image at
+the `runtime_version` it records and offers members only pinned challenges.
+`runtime_image_refresh_seconds` (default 3600) is how often it asks the
+registry again.
 The JSON file includes `tig_api_url`, `pool_player_id`, `public_origin` (the
 member API's HTTPS origin), `submissions_enabled` and `new_work_enabled`.
 Both boolean flags default to false. Enabling new work requires enabled

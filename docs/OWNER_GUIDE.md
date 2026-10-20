@@ -140,14 +140,18 @@ Use **Resume new work** once the cause is resolved. This button cannot override
 disabled server capabilities or unresolved funding/evidence checks. The owner
 screen has no separate per-member suspend/ban control.
 
-**Which challenges members receive follows the release, not a setting.** Within
-an offered resource the pool hands out every active challenge whose runtime
-image is pinned in the served release manifest, for CPU and GPU alike, and
-records the pinned list and the exclusions in each reservation's evidence. To
-add or drop a challenge, pin or remove its runtime image in a paired release,
-after timing it against TIG's benchmark lifetime on the hardware members use.
-The capabilities route reports the pinned ids as `offered_challenges`, so
-members' masters can see what they may receive.
+**Which challenges members receive is not a setting.** Within an offered
+resource the pool hands out every active TIG challenge whose official runtime
+image it has pinned, for CPU and GPU alike. The coordinator pins the images
+itself: for each active challenge it resolves the content digest of TIG's
+runtime image at the `runtime_version` the release records, and every
+assignment names the image to run. A challenge TIG adds is offered as soon as
+its image is published; no release and no member update is needed. The
+operator page lists the pins under Runtime images, the capabilities route
+reports the ids as `offered_challenges`, and each reservation's evidence
+records the pinned list, the exclusions and the image used. The one lever
+left is the runtime version in the release manifest, for when TIG moves to a
+new runtime.
 
 **To onboard a member, the member signs in and connects their own master.**
 

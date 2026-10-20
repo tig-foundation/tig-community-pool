@@ -1,10 +1,10 @@
 # Serving the recorded pool and worker release
 
 The API publishes a paired release and its checked worker installer. The
-served pair names the tested pool and worker commits, pins the official
-challenge runtime images by digest and offers only the resources listed in
-the service configuration's `offered_resources` (CPU by default; GPU once
-validated).
+served pair names the tested pool and worker commits and the TIG runtime
+version whose official challenge images the pool pins, and offers only the
+resources listed in the service configuration's `offered_resources` (CPU by
+default; GPU once validated).
 See the [deployment procedure](MAINNET_DEPLOYMENT.md); what has been exercised
 and the checks that remain open, including the reward cycle, are listed in
 [ROADMAP.md](ROADMAP.md).
@@ -45,9 +45,18 @@ configuring release metadata does not enable member funds, work or settlement.
   "api_version": "2.0",
   "pool": {"repository": "https://github.com/Daniel-T-S-Adams/community-pool.git", "commit": "<40 hex characters>", "tag": "<tested pool tag>"},
   "worker": {"repository": "https://github.com/Daniel-T-S-Adams/community-pool-worker.git", "commit": "<40 hex characters>", "tag": "<tested worker tag>", "state_version": 1, "installer_sha256": "<64 hex characters>"},
-  "runtime_images": {"c001": "ghcr.io/tig-foundation/tig-monorepo/satisfiability/runtime@sha256:<64 hex characters>"}
+  "runtime_version": "0.0.8"
 }
 ```
+
+The served document adds `runtime_images`: the official image the pool has
+pinned for each active challenge at that runtime version, as
+`ghcr.io/tig-foundation/tig-monorepo/<challenge name>/runtime@sha256:<digest>`.
+The coordinator resolves them from the registry (see [DASHBOARD.md](DASHBOARD.md));
+a manifest that still carries a hand-pinned `runtime_images` map is refused at
+startup. `release_digest` covers the served document, so it changes when a pin
+does. `GET /api/v2/runtime-images` lists the same pins with the challenge
+name and the time each was resolved.
 
 This is an interface example. A release producer must also record the tested
 database migrations, application images, TIG/runtime versions and validation
@@ -61,9 +70,9 @@ and concurrent nonce capacity. Only resources listed in the service
 configuration's `offered_resources` are shown and served; by default that is
 CPU only, until the operator has validated GPU execution end to end on the
 members' hardware, as [ROADMAP.md](ROADMAP.md) records for vector search. Within an offered
-resource, every active challenge whose runtime image is pinned in this manifest
-is handed out; pinning or dropping an image is how a challenge is added or
-removed. It provides the checked download and commands
+resource, every active challenge whose official runtime image the pool has
+pinned is handed out; a new TIG challenge is offered as soon as its image is
+published, without a release. It provides the checked download and commands
 using a new `innopool-v2-member` directory. The command contains no execution
 token; the installer prompts privately for it. Hardware compatibility is
 checked before an installed worker can request work.
