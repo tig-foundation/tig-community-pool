@@ -103,6 +103,31 @@ held amount once into its creation round's pot. No qualifying credit is earned
 and submission fees remain the operator's expense. This rule does not expire
 an assignment that was never acknowledged or release funds early.
 
+### The lifetime ends without activation
+
+TIG keeps a benchmark in the pool player's feed until its challenge lifetime
+ends and drops it afterwards, so the last block of that lifetime records the
+benchmark's final state. Once the lifetime has strictly elapsed in a validated
+later block (the same anchors and unchanged lifetime as above) and a complete
+feed no longer contains the benchmark, reconciliation reads the archived block
+at exactly `block_started + lifespan_period`. Handed-over work whose precommit
+and benchmark are confirmed there, with an accepted result intent, ends as
+`expired` in one of two ways:
+
+- `tig-expired-before-activation-v1`: a proof is confirmed in that block but its
+  `block_active` lies past the lifetime. TIG delays activation by the submission
+  delay (a proof confirmed `d` blocks after the precommit activates about `1.2 d`
+  blocks later), so results that arrive later than roughly 54 blocks into a
+  120-block lifetime can never activate. The accepted proof intent is unchanged.
+- `tig-unproven-results-expiry-v1`: no proof is confirmed in that block. A
+  potentially sent proof intent (for example a POST that timed out) is marked
+  `rejected`; an unsent one is `cancelled`. Neither is ever resent.
+
+A fraud record, an unconfirmed precommit or benchmark, a proof whose
+`block_active` lies inside the lifetime (the active-set path owns that outcome)
+or a missing boundary block keeps the work held. Collateral stays held for
+normal finalization exactly as under the other expiry rules.
+
 ### TIG never received a precommit
 
 A precommit send can time out without TIG recording anything. TIG confirms a

@@ -492,6 +492,81 @@ class SubmissionTests(DatabaseCase):
         self.assertEqual(self.balance()["slots"],1)
         self.assertEqual(self.balance()["collateral"],40*TIG)
 
+    def lifetime_end_fixture(self, *, proof='late', benchmark=True, boundary=True, verified=False, height=200):
+        """A handed-over benchmark whose results TIG confirmed; the archived boundary block records its final state."""
+        row, precommit = self.accepted_with_pending_proof()
+        proof_intent = self.row("SELECT id FROM protocol_outbox WHERE reservation_id=%s AND kind='proofs'", (row['id'],))
+        if verified:
+            submissions.record_response(self.db, proof_intent['id'], {'status': 200, 'body': {'verified': {'Ok': None}}})
+        identity = precommit['benchmark_id']
+        feed = {'precommits': [precommit], 'benchmarks': [], 'proofs': [], 'frauds': []}
+        if benchmark:
+            feed['benchmarks'] = [{'id': identity, 'state': {'block_confirmed': 10}, 'details': {'stopped': False,
+                'merkle_root': 'a'*64, 'sampled_nonces': [0], 'num_active_bundles': 2, 'average_quality_by_bundle': [9, 7]}}]
+        if proof != 'none':
+            feed['proofs'] = [{'benchmark_id': identity, 'state': {'block_confirmed': 100},
+                               'details': {'block_active': 210 if proof == 'late' else 120, 'submission_delay': 92}}]
+        empty = {'precommits': [], 'benchmarks': [], 'proofs': [], 'frauds': []}
+        for block_height, pending in ((128, feed), (height, empty)):
+            if block_height == 128 and not boundary:
+                continue
+            data = observation(block_height)
+            for anchor in ('start', 'end'):
+                data[anchor]['block']['config']['challenges'] = {'c1': {'lifespan_period': 120}}
+            data['pool_player_id'] = self.player
+            data['pool_pending'] = pending
+            outcome = BlockStore(self.db).record(data, collector='lifetime-end-fixture')
+            self.assertTrue(outcome['complete'], outcome)
+        return row, proof_intent, outcome['block_id']
+
+    def test_proof_confirmed_too_late_to_activate_expires_after_the_lifetime(self):
+        row, proof_intent, block_id = self.lifetime_end_fixture(proof='late', verified=True)
+        before = self.balance()
+        reconcile_block(self.db, block_id, self.player)
+        reconcile_block(self.db, block_id, self.player)
+        saved = self.row('SELECT state,slot_held,collateral_outcome,active_at_height FROM reservations WHERE id=%s', (row['id'],))
+        self.assertEqual((saved['state'], saved['slot_held'], saved['collateral_outcome'], saved['active_at_height']),
+                         ('expired', False, None, None))
+        self.assertEqual(self.balance()['collateral'], before['collateral'])
+        self.assertEqual(self.balance()['slots'], 0)
+        # The accepted proof intent is immutable; the outcome evidence names the late activation.
+        self.assertEqual(self.row('SELECT state FROM protocol_outbox WHERE id=%s', (proof_intent['id'],))['state'], 'accepted')
+        events = self.row("SELECT count(*) AS n, min(details::text) AS details FROM reservation_events WHERE reservation_id=%s AND kind='expired'",
+                          (row['id'],))
+        self.assertEqual(events['n'], 1)
+        evidence = json.loads(events['details'])['evidence']
+        self.assertEqual((evidence['source'], evidence['boundary_height'], evidence['block_active'], evidence['submission_delay'],
+                          evidence['proofs_intent']['state']), ('tig-expired-before-activation-v1', 128, 210, 92, 'accepted'))
+
+    def test_timed_out_proof_send_expires_after_the_lifetime_without_a_proof(self):
+        row, proof_intent, block_id = self.lifetime_end_fixture(proof='none')
+        before = self.balance()
+        reconcile_block(self.db, block_id, self.player)
+        saved = self.row('SELECT state,slot_held,collateral_outcome FROM reservations WHERE id=%s', (row['id'],))
+        self.assertEqual((saved['state'], saved['slot_held'], saved['collateral_outcome']), ('expired', False, None))
+        self.assertEqual(self.balance()['collateral'], before['collateral'])
+        intent = self.row('SELECT state,evidence FROM protocol_outbox WHERE id=%s', (proof_intent['id'],))
+        self.assertEqual((intent['state'], intent['evidence']['source']), ('rejected', 'tig-unproven-results-expiry-v1'))
+        # The member's worker sees a terminal state and offers again; a replay records nothing new.
+        benchmark_id = self.row('SELECT benchmark_id FROM reservations WHERE id=%s', (row['id'],))['benchmark_id']
+        self.assertEqual(member_protocol.get(self.db, benchmark_id, self.member)['state'], 'expired')
+        reconcile_block(self.db, block_id, self.player)
+        self.assertEqual(self.row("SELECT count(*) AS n FROM reservation_events WHERE reservation_id=%s AND kind='expired'",
+                                  (row['id'],))['n'], 1)
+
+    def test_lifetime_end_needs_the_boundary_block_results_and_no_activation(self):
+        cases = ({'boundary': False}, {'proof': 'active'}, {'benchmark': False}, {'proof': 'none', 'height': 120, 'boundary': False})
+        for index, options in enumerate(cases):
+            with self.subTest(options=options):
+                if index:
+                    self.tearDown()
+                    self.setUp()
+                row, proof_intent, block_id = self.lifetime_end_fixture(**options)
+                reconcile_block(self.db, block_id, self.player)
+                self.assertEqual(self.row('SELECT state FROM reservations WHERE id=%s', (row['id'],))['state'], 'accepted')
+                self.assertEqual(self.row('SELECT state FROM protocol_outbox WHERE id=%s', (proof_intent['id'],))['state'], 'uncertain')
+                self.assertEqual(self.balance()['slots'], 1)
+
     def late_result_fixture(self, *, height=200, status=400, origin='https://tig.example', body=None,
                             raw_hash=None, still_present=False):
         row, intent = self.queued()
