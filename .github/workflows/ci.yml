@@ -41,7 +41,7 @@ jobs:
       - name: Check out the paired whole-benchmark worker
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
-          repository: Daniel-T-S-Adams/community-pool-worker
+          repository: tig-foundation/tig-community-pool-worker
           ref: bda8f959ba874f9f208b7661029af412d9bddc79
           path: .paired-worker
           persist-credentials: false
