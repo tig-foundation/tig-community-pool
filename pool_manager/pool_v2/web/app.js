@@ -179,37 +179,9 @@ async function previewRound(row) {
   if(!list.childNodes.length)list.append(node('p','This complete round has zero member credit. The whole pot goes to the operator.'));
   $('action-fields').append(list);$('action-submit').disabled=!capabilities.settlement_enabled || !preview.preview;
 }
-function renderChallenges(data) {
-  const box=$('offered-challenges');box.replaceChildren();
-  for(const [resource,title] of [['CPU','CPU challenges'],['GPU','GPU challenges'],[null,'Not in the current block']]){
-    const rows=data.challenges.filter(row=>row.resource===resource);if(!rows.length)continue;
-    box.append(node('h3',title));
-    for(const row of rows){
-      const label=node('label',undefined,'choice'),input=node('input');input.type='checkbox';input.id='offer-'+row.id;input.value=row.id;
-      input.checked=data.restricted?row.offered:(row.active&&row.runtime_image);
-      input.disabled=!row.runtime_image||(row.resource!==null&&!row.resource_offered);
-      const notes=[];if(!row.runtime_image)notes.push('no runtime image pinned in this release');
-      if(row.resource&&!row.resource_offered)notes.push(row.resource+' is not offered by this deployment');
-      if(row.resource&&!row.active)notes.push('not active in the current block');
-      label.append(input,node('span',row.id+(row.name?' · '+row.name.replaceAll('_',' '):'')+(row.resource?' · '+row.resource:'')+(row.tracks?' · '+row.tracks+' tracks':'')));
-      if(notes.length)label.append(node('span',notes.join(' · '),'muted small'));
-      box.append(label);
-    }
-  }
-  const count=data.challenges.filter(row=>row.offered).length;
-  $('challenges-health').textContent=data.restricted?count+' of '+data.challenges.length+' offered':'All active challenges offered';
-  $('challenges-health').classList.toggle('active',data.restricted&&count>0);
-  $('offered-challenges-form').querySelector('button').disabled=!data.challenges.length;
-}
-$('offered-challenges-form').addEventListener('submit',event=>{event.preventDefault();run(async()=>{
-  const challenges=[...$('offered-challenges').querySelectorAll('input:checked')].map(input=>input.value);
-  await api('operator/controls/offered-challenges',{challenges,reason:$('challenges-reason').value.trim(),event_key:key()});
-  $('challenges-reason').value='';await loadOperator();
-  notice(challenges.length?'Offered challenges saved. Members receive only the ticked challenges.':'No challenge is offered. Reservations stop until at least one is ticked.');
-},$('offered-challenges-form').querySelector('button'));});
 async function loadOperator() {
-  const [data,payments,custody,funding,income,spending,challenges]=await Promise.all([api('operator/dashboard?limit=50&offset='+operatorOffset),api('operator/withdrawals'),api('operator/custody'),api('operator/funding'),api('operator/income'),api('operator/spending'),api('operator/challenges')]);
-  operatorIncome=income;renderSpending(spending);renderChallenges(challenges);
+  const [data,payments,custody,funding,income,spending]=await Promise.all([api('operator/dashboard?limit=50&offset='+operatorOffset),api('operator/withdrawals'),api('operator/custody'),api('operator/funding'),api('operator/income'),api('operator/spending')]);
+  operatorIncome=income;renderSpending(spending);
   await loadCapabilities();$('operator-login').hidden=true;$('operator-content').hidden=false;$('operator-sign-out').hidden=false;
   const sum=(asset,location,kind)=>data.balances.filter(row=>row.asset===asset&&row.location===location&&(!kind||row.kind===kind)).reduce((total,row)=>total+BigInt(row.balance),0n);
   $('operator-balances').replaceChildren();

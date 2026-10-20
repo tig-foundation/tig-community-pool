@@ -6,6 +6,7 @@ import json
 import logging
 import os
 from pathlib import Path
+import re
 import signal
 import sys
 import threading
@@ -47,10 +48,20 @@ def main(argv=None):
     if type(timeout) is not int or not 1<=timeout<=300:parser.error('submission_timeout_seconds must be an integer between 1 and 300')
     interval=config.get('precommit_interval_seconds',6)
     if type(interval) is not int or not 0<=interval<=60:parser.error('precommit_interval_seconds must be an integer between 0 and 60')
+    manifest_file=config.get('release_manifest_file')
+    if new_work and not manifest_file:
+        parser.error('new work requires release_manifest_file: members receive only challenges whose runtime image the served release pins')
+    pinned=None
+    if manifest_file:
+        try:images=json.loads(Path(manifest_file).read_text())['runtime_images']
+        except (OSError,ValueError,KeyError,TypeError):images=None
+        if not isinstance(images,dict) or not images or not all(type(key) is str and re.fullmatch(r'c[0-9]+',key) for key in images):
+            parser.error('release_manifest_file must name a readable release manifest pinning a runtime image per challenge id')
+        pinned=sorted(images)
     coordinator=Coordinator(database,address(config['pool_player_id']),PublicTigClient(origin),
         TigSubmissionClient(origin,key,enabled=enabled,timeout=timeout),new_work=new_work,
         binary_hosts=config.get('binary_hosts'),max_age=config.get('max_block_age',120),artifact_origin=config.get('public_origin'),
-        binary_reuse_seconds=reuse,reference_max_age=reference_age,precommit_interval=interval)
+        binary_reuse_seconds=reuse,reference_max_age=reference_age,precommit_interval=interval,pinned_challenges=pinned)
     logging.basicConfig(level=logging.INFO,format='%(asctime)s %(levelname)s %(message)s')
     log=logging.getLogger('innopool-v2-coordinator')
     stop=threading.Event()

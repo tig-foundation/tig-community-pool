@@ -114,10 +114,6 @@ class PauseChange(WithdrawalRelease):
     paused: StrictBool
 
 
-class OfferedChallenges(WithdrawalRelease):
-    challenges: list[StrictStr] = Field(max_length=64)
-
-
 class SpendingCap(WithdrawalRelease):
     window_seconds: StrictInt = Field(ge=3600, le=31622400)
     tig_fee_window_units: StrictStr = Field(pattern=r'^(0|[1-9][0-9]{0,77})$')
@@ -304,7 +300,7 @@ def create_app(settings):
                          "custody":settings.custody_network.custody if settings.custody_network else None,
                          "token":settings.custody_network.token if settings.custody_network else None,
                          "assignment_unit": "whole-benchmark", "offered_resources": list(offered),
-                         "offered_challenges": controls.offered_challenges(database)})
+                         "offered_challenges": sorted(release['runtime_images']) if release else None})
 
     def recorded_release():
         if release is None:raise HTTPException(503,'a verified paired release has not been configured')
@@ -438,16 +434,6 @@ def create_app(settings):
     @app.post('/api/v2/operator/controls/new-work')
     def pause_new_work(body:PauseChange,actor=Depends(operator)):
         return response(controls.set_pause(database,body.paused,actor=actor,reason=body.reason,event_key=body.event_key))
-
-    @app.get('/api/v2/operator/challenges')
-    def operator_challenges(actor=Depends(operator)):
-        return response(controls.catalogue(database,manifest=release,offered_resources=offered))
-
-    @app.post('/api/v2/operator/controls/offered-challenges')
-    def set_offered_challenges(body:OfferedChallenges,actor=Depends(operator)):
-        allowed=sorted(release['runtime_images']) if release else None
-        return response(controls.set_offered_challenges(database,list(body.challenges),actor=actor,reason=body.reason,
-            event_key=body.event_key,allowed=allowed))
 
     @app.get('/api/v2/operator/spending')
     def spending_dashboard(actor=Depends(operator)):

@@ -61,9 +61,9 @@ and concurrent nonce capacity. Only resources listed in the service
 configuration's `offered_resources` are shown and served; by default that is
 CPU only, until the operator has validated GPU execution end to end on the
 members' hardware, as [ROADMAP.md](ROADMAP.md) records for vector search. Within an offered
-resource, the operator's saved list of offered challenges decides which
-challenges are handed out; a challenge needs its runtime image pinned in this
-manifest before it can be offered. It provides the checked download and commands
+resource, every active challenge whose runtime image is pinned in this manifest
+is handed out; pinning or dropping an image is how a challenge is added or
+removed. It provides the checked download and commands
 using a new `innopool-v2-member` directory. The command contains no execution
 token; the installer prompts privately for it. Hardware compatibility is
 checked before an installed worker can request work.

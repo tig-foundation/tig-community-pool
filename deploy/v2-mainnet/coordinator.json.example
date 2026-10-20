@@ -2,6 +2,7 @@
   "tig_api_url": "https://mainnet-api.tig.foundation",
   "pool_player_id": "REPLACE_POOL_WALLET",
   "public_origin": "https://REPLACE_POOL_API_HOSTNAME",
+  "release_manifest_file": "/etc/innopool-v2-mainnet/release-manifest.json",
   "require_pilot_limits": false,
   "submissions_enabled": false,
   "new_work_enabled": false,

@@ -104,7 +104,8 @@ def network_reference(database, *, now, max_age, refresh=None):
     return index
 
 
-def reserve_next(database, player_id, *, now, max_age=120, reference_max_age=1800, refresh_references=None):
+def reserve_next(database, player_id, *, now, max_age=120, reference_max_age=1800, refresh_references=None,
+                 pinned_challenges=None):
     store = BlockStore(database)
     with database.transaction() as cursor:
         cursor.execute("SELECT id FROM observed_blocks ORDER BY height DESC LIMIT 1")
@@ -127,7 +128,6 @@ def reserve_next(database, player_id, *, now, max_age=120, reference_max_age=180
         lock(cursor, "observation-stream")
         lock(cursor, "operator:protocol-budget")
         if controls.blocked(database,cursor=cursor):return None
-        offered=controls.offered_challenges(database,cursor=cursor)
         cursor.execute("SELECT id FROM observed_blocks ORDER BY height DESC LIMIT 1")
         if cursor.fetchone()["id"] != block_id:
             raise ProtocolDataError("new block arrived before work reservation")
@@ -144,7 +144,7 @@ def reserve_next(database, player_id, *, now, max_age=120, reference_max_age=180
             try:
                 selection = choose(snapshot, observation["algorithms"]["binarys"], player_id=player_id,
                     resource=offer["resource"], compute_type=offer["compute_type"], now=now, max_age=max_age,
-                    reference_index=reference_index, reference_max_age=reference_max_age, offered_challenges=offered)
+                    reference_index=reference_index, reference_max_age=reference_max_age, pinned_challenges=pinned_challenges)
             except NoCompatibleWork:
                 continue
             # An unavailable member cannot prevent the next queued member from

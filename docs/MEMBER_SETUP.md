@@ -76,8 +76,8 @@ request. CPU types are `aws_t3`, `aws_t3a`, `aws_t4g`, `aws_c7i`, `aws_c7a`,
 the other CPU types require AMD64. GPU requests use `aws_g4dn` on AMD64 with the
 appropriate NVIDIA runtime and PTX, and are accepted only once the pool lists
 GPU among its `offered_resources` in the capabilities route. Within an offered
-resource you receive only challenges on the pool's `offered_challenges` list
-when the operator has saved one. Every participating machine must execute the
+resource you receive any active challenge whose runtime image the pool's release
+pins; the capabilities route lists them as `offered_challenges`. Every participating machine must execute the
 exact assigned binary and runtime compatibly; CPU/GPU family alone is not enough.
 
 Your master supplies `capacity.workers`: concurrent nonce computations available

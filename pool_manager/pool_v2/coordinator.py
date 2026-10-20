@@ -47,7 +47,7 @@ def verify_archive(archive, algorithm_name, compute_type):
 
 
 class Coordinator:
-    def __init__(self,database,player_id,public_client,submission_client,*,new_work=False,binary_hosts=None,download=None,max_age=120,artifact_origin=None,binary_reuse_seconds=24*3600,reference_max_age=1800,precommit_interval=6):
+    def __init__(self,database,player_id,public_client,submission_client,*,new_work=False,binary_hosts=None,download=None,max_age=120,artifact_origin=None,binary_reuse_seconds=24*3600,reference_max_age=1800,precommit_interval=6,pinned_challenges=None):
         self.database,self.player_id=database,player_id
         if type(precommit_interval) is not int or not 0<=precommit_interval<=60:
             raise ValueError("precommit interval must be an integer of seconds between 0 and 60")
@@ -70,6 +70,13 @@ class Coordinator:
         # Selection copies parameters from a whole-network reference at most
         # this old. A staler one is re-read only while members wait for work.
         self.reference_max_age=reference_max_age
+        if pinned_challenges is not None and (not isinstance(pinned_challenges,(list,tuple,set,frozenset))
+                or not pinned_challenges or any(type(item) is not str for item in pinned_challenges)):
+            raise ValueError("pinned challenges must name at least one challenge id")
+        # The served release pins one runtime image per challenge and members'
+        # workers run nothing else, so selection offers only these. None leaves
+        # selection unrestricted for library use and tests.
+        self.pinned_challenges=None if pinned_challenges is None else frozenset(pinned_challenges)
 
     def refresh_references(self):
         """One whole-network read, kept as the best bundle per algorithm and track."""
@@ -189,7 +196,8 @@ class Coordinator:
         reserved=None
         if self.new_work and self.writer.enabled and not controls.blocked(self.database):
             reserved=work_requests.reserve_next(self.database,self.player_id,now=int(time.time()),max_age=self.max_age,
-                reference_max_age=self.reference_max_age,refresh_references=self.refresh_references)
+                reference_max_age=self.reference_max_age,refresh_references=self.refresh_references,
+                pinned_challenges=self.pinned_challenges)
         # Historical replay is deliberately bounded to one block per cycle;
         # current protocol receipts and member work stay ahead of the backlog.
         replay=reconcile_pending(self.database,self.player_id,limit=1,artifact_origin=self.artifact_origin,

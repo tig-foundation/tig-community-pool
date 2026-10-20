@@ -31,7 +31,6 @@ Use this table to decide where a task belongs:
 | Check balances, deposits, work and alerts | Pool website | Operator dashboard → Refresh |
 | Change a member's collateral requirement | Pool website | Members & collateral → Edit multiplier |
 | Pause or resume new pool work | Pool website | Pause new work / Resume new work |
-| Choose which challenges members receive | Pool website | Offered challenges → tick, reason, Save offered challenges |
 | Record or change the spending cap | Pool website | Spending cap → Set spending cap |
 | Register a member | Member's browser and MetaMask | Member account → Connect wallet → sign in |
 | Connect, drain or update a worker | Member website, then that worker's machine | Execution token and verified installer |
@@ -141,16 +140,14 @@ Use **Resume new work** once the cause is resolved. This button cannot override
 disabled server capabilities or unresolved funding/evidence checks. The owner
 screen has no separate per-member suspend/ban control.
 
-**To choose which challenges members receive, use the Offered challenges card.**
-Tick only the challenges you have timed on the hardware members will use, give
-a reason and save. Selection then ignores every other challenge, for CPU and
-GPU alike, and records the list and the exclusions in each reservation's
-evidence. A challenge whose runtime image is not pinned in the served release
-cannot be ticked. Until you save a list the pool offers every active challenge
-of the offered resources, which is how deployments behaved before migration
-028. Saving an empty list stops new reservations without pausing anything
-else. The list is public: the capabilities route reports it as
-`offered_challenges`, so members' masters can see what they may receive.
+**Which challenges members receive follows the release, not a setting.** Within
+an offered resource the pool hands out every active challenge whose runtime
+image is pinned in the served release manifest, for CPU and GPU alike, and
+records the pinned list and the exclusions in each reservation's evidence. To
+add or drop a challenge, pin or remove its runtime image in a paired release,
+after timing it against TIG's benchmark lifetime on the hardware members use.
+The capabilities route reports the pinned ids as `offered_challenges`, so
+members' masters can see what they may receive.
 
 **To onboard a member, the member signs in and connects their own master.**
 

@@ -12,8 +12,8 @@ capabilities route reports `api_version`, `assignment_unit: whole-benchmark`,
 whether new work is enabled and `offered_resources`, the resources the operator
 has validated on this pool (`CPU` alone until GPU execution is validated there); a
 work request for a resource that is not offered is refused with 409. It also
-reports `offered_challenges`: the challenge ids the operator hands out, or
-`null` while every active challenge of the offered resources is offered. Amounts exposed to clients use decimal strings
+reports `offered_challenges`: the challenge ids this pool can hand out, those whose
+runtime image the served release pins, or `null` while no release is configured. Amounts exposed to clients use decimal strings
 of token base units, with 18 decimal places per TIG.
 
 ## Work request
