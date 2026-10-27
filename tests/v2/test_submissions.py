@@ -595,6 +595,70 @@ class SubmissionTests(DatabaseCase):
                 self.assertEqual(self.row('SELECT state FROM protocol_outbox WHERE id=%s', (proof_intent['id'],))['state'], 'uncertain')
                 self.assertEqual(self.balance()['slots'], 1)
 
+    def unconfirmed_result_fixture(self, *, status=502, body='Bad gateway', boundary='precommit', height=200):
+        """Results sent once and answered by a transport failure; the archived boundary block shows what TIG recorded."""
+        row, intent = self.queued()
+        submissions.begin(self.db, intent['id'], preflight=self.preflight())
+        submissions.record_response(self.db, intent['id'], {'status': 200, 'body': {'benchmark_id': 'b'*32}})
+        precommit = self.precommit(row)
+        accepted = submissions.publish_assignment(self.db, row['id'], precommit, evidence={'block': 9})
+        benchmarks.acknowledge(self.db, row['id'], self.member, accepted['assignment_digest'])
+        member_protocol.results(self.db, accepted['benchmark_id'], self.member,
+                                {'merkle_root': 'a'*64, 'solution_quality': [9]*accepted['assignment']['num_nonces']})
+        result = self.row("SELECT id FROM protocol_outbox WHERE reservation_id=%s AND kind='results'", (row['id'],))
+        submissions.begin(self.db, result['id'])
+        self.assertFalse(submissions.record_response(self.db, result['id'], {'status': status, 'body': body,
+            'path': '/submit-benchmark', 'origin': 'https://tig.example', 'raw_sha256': hashlib.sha256(body.encode()).hexdigest(),
+            'received_at': datetime.now(timezone.utc).isoformat()}))
+        self.assertEqual(self.row('SELECT state FROM protocol_outbox WHERE id=%s', (result['id'],))['state'], 'uncertain')
+        identity = accepted['benchmark_id']
+        feeds = {'precommit': {'precommits': [precommit], 'benchmarks': [], 'proofs': [], 'frauds': []},
+                 'benchmark': {'precommits': [precommit], 'proofs': [], 'frauds': [], 'benchmarks': [{'id': identity,
+                     'state': {'block_confirmed': 100}, 'details': {'stopped': False, 'merkle_root': 'a'*64, 'sampled_nonces': [0],
+                     'num_active_bundles': 2, 'average_quality_by_bundle': [9, 7]}}]},
+                 'empty': {'precommits': [], 'benchmarks': [], 'proofs': [], 'frauds': []}}
+        blocks = ([(128, feeds[boundary])] if boundary else []) + [(height, feeds['empty'])]
+        for block_height, pending in blocks:
+            data = observation(block_height)
+            for anchor in ('start', 'end'):
+                data[anchor]['block']['config']['challenges'] = {'c1': {'lifespan_period': 120}}
+            data['pool_player_id'] = self.player
+            data['pool_pending'] = pending
+            outcome = BlockStore(self.db).record(data, collector='unconfirmed-result-fixture')
+            self.assertTrue(outcome['complete'], outcome)
+        return row, result, outcome['block_id']
+
+    def test_unconfirmed_results_send_expires_after_the_lifetime(self):
+        row, result, block_id = self.unconfirmed_result_fixture()
+        before = self.balance()
+        reconcile_block(self.db, block_id, self.player, submission_origin='https://tig.example')
+        reconcile_block(self.db, block_id, self.player, submission_origin='https://tig.example')
+        saved = self.row('SELECT state,slot_held,collateral_outcome,benchmark_id FROM reservations WHERE id=%s', (row['id'],))
+        self.assertEqual((saved['state'], saved['slot_held'], saved['collateral_outcome']), ('expired', False, None))
+        self.assertEqual(self.balance()['collateral'], before['collateral'])
+        self.assertEqual(self.balance()['slots'], 0)
+        intent = self.row('SELECT state,evidence FROM protocol_outbox WHERE id=%s', (result['id'],))
+        self.assertEqual(intent['state'], 'rejected')
+        self.assertEqual((intent['evidence']['source'], intent['evidence']['boundary_height'], intent['evidence']['last_response']['status'],
+                          intent['evidence']['proofs_intent']), ('tig-unconfirmed-results-expiry-v1', 128, '502', None))
+        # The member's worker sees a terminal state and offers again; a replay records nothing new.
+        self.assertEqual(member_protocol.get(self.db, saved['benchmark_id'], self.member)['state'], 'expired')
+        self.assertEqual(self.row("SELECT count(*) AS n FROM reservation_events WHERE reservation_id=%s AND kind='expired'",
+                                  (row['id'],))['n'], 1)
+
+    def test_unconfirmed_results_expiry_needs_the_boundary_precommit_and_no_benchmark(self):
+        cases = ({'boundary': None}, {'boundary': 'benchmark'}, {'boundary': 'empty'}, {'boundary': None, 'height': 128})
+        for index, options in enumerate(cases):
+            with self.subTest(options=options):
+                if index:
+                    self.tearDown()
+                    self.setUp()
+                row, result, block_id = self.unconfirmed_result_fixture(**options)
+                reconcile_block(self.db, block_id, self.player, submission_origin='https://tig.example')
+                self.assertEqual(self.row('SELECT state FROM reservations WHERE id=%s', (row['id'],))['state'], 'accepted')
+                self.assertEqual(self.row('SELECT state FROM protocol_outbox WHERE id=%s', (result['id'],))['state'], 'uncertain')
+                self.assertEqual(self.balance()['slots'], 1)
+
     def late_result_fixture(self, *, height=200, status=400, origin='https://tig.example', body=None,
                             raw_hash=None, still_present=False):
         row, intent = self.queued()

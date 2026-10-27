@@ -128,6 +128,24 @@ A fraud record, an unconfirmed precommit or benchmark, a proof whose
 or a missing boundary block keeps the work held. Collateral stays held for
 normal finalization exactly as under the other expiry rules.
 
+### Results were sent but TIG never recorded them
+
+A results POST can end in a transport failure (a gateway error, a timeout)
+that says nothing about whether TIG recorded the payload. The intent stays
+`uncertain` and is never resent. Because TIG lists a benchmark in the pool
+player's feed from the block its results are confirmed until the lifetime
+ends, the same archived boundary block settles this case too: once the
+lifetime has strictly elapsed and a complete later feed no longer contains the
+benchmark, a confirmed precommit with no benchmark, proof or fraud record in
+the block at exactly `block_started + lifespan_period` proves the results never
+arrived in time, and TIG accepts none after it. The work ends as `expired`
+with `tig-unconfirmed-results-expiry-v1`; the results intent is marked
+`rejected` with that evidence, which names the last recorded response, and any
+proof intent follows the rule above. A missing boundary block, an unconfirmed
+precommit, a listed benchmark, or an explicit TIG reply covered by the
+late-results rule keeps the work on its own path. Collateral is treated as
+under the other expiry rules.
+
 ### TIG never received a precommit
 
 A precommit send can time out without TIG recording anything. TIG confirms a

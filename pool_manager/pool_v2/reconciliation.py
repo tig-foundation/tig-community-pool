@@ -244,6 +244,78 @@ def _expire_after_lifetime(database, row, observation, snapshot, player_id):
     return True
 
 
+def _expire_unconfirmed_results(database, row, observation, snapshot, player_id):
+    """End handed-over work whose sent results TIG never recorded inside the lifetime.
+
+    A results POST answered by a transport failure (a gateway error, a timeout)
+    leaves the intent uncertain, and the pool never resends it. TIG keeps the
+    confirmed precommit in the pool player's feed until the challenge lifetime
+    ends and lists the benchmark there from the block its results are confirmed,
+    so the archived block at exactly block_started + lifespan_period settles the
+    question: a confirmed precommit with no benchmark, proof or fraud record
+    there means the results never arrived in time, and TIG accepts none after
+    it. The outcome is read from that block, never inferred from the failed
+    response or elapsed time alone; a missing boundary block, an unconfirmed
+    precommit or a listed benchmark keeps the work held.
+    """
+    if row['handed_over_at'] is None:
+        return False
+    with database.transaction() as cursor:
+        cursor.execute("""SELECT 1 FROM protocol_outbox WHERE reservation_id=%s AND kind='results'
+            AND state='uncertain' LIMIT 1""", (row['id'],))
+        if not cursor.fetchone():
+            return False
+    lifetime = _expired_lifetime(database, row, observation, snapshot)
+    if lifetime is None:
+        return False
+    boundary = lifetime['block_started'] + lifetime['lifespan_period']
+    with database.transaction() as cursor:
+        cursor.execute("SELECT id FROM observed_blocks WHERE height=%s", (boundary,))
+        last = cursor.fetchone()
+    if not last:
+        return False
+    identity = row['benchmark_id']
+    try:
+        final_observation, final = BlockStore(database).read(last['id'])
+        feed = player_feed(final_observation, player_id)
+        precommit, benchmark, proof, fraud = (feed[name].get(identity) for name in
+                                              ('precommits', 'benchmarks', 'proofs', 'frauds'))
+        if not confirmed(precommit, final.height) or benchmark is not None or proof is not None or fraud is not None:
+            return False
+    except (ProtocolDataError, KeyError, TypeError, ValueError):
+        return False
+    evidence = {**lifetime, 'source': 'tig-unconfirmed-results-expiry-v1', 'boundary_block_id': final.block_id,
+                'boundary_height': final.height}
+    with database.transaction() as cursor:
+        # Serialize against uploads, first sends and other outcome transitions.
+        locked = benchmarks._locked(cursor, row['id'], budget=True)
+        if locked['state'] != 'accepted' or locked['handed_over_at'] is None:
+            return False
+        cursor.execute("""SELECT * FROM protocol_outbox WHERE reservation_id=%s
+            AND kind IN ('results','proofs') ORDER BY kind FOR UPDATE""", (row['id'],))
+        intents = {intent['kind']: intent for intent in cursor.fetchall()}
+        results, proofs = intents.get('results'), intents.get('proofs')
+        if not results or results['state'] != 'uncertain':
+            return False
+        cursor.execute("""SELECT id,response->>'status' AS status FROM submission_responses WHERE outbox_id=%s
+            ORDER BY created_at DESC LIMIT 1""", (results['id'],))
+        last_response = cursor.fetchone()
+        evidence['results_intent_id'] = str(results['id'])
+        evidence['results_sent_at'] = results['sent_at'].isoformat() if results['sent_at'] else None
+        evidence['last_response'] = ({'id': str(last_response['id']), 'status': last_response['status']}
+                                     if last_response else None)
+        evidence['proofs_intent'] = {'id': str(proofs['id']), 'state': proofs['state']} if proofs else None
+        benchmarks.record_outcome(database, row['id'], 'expired', height=snapshot.height,
+                                  evidence=evidence, _cursor=cursor)
+        # The potentially sent results are never resent, and nothing may go out after expiry.
+        cursor.execute("UPDATE protocol_outbox SET state='rejected',evidence=%s WHERE id=%s",
+                       (Json(evidence), results['id']))
+        if proofs and proofs['state'] in ('ready', 'uncertain'):
+            cursor.execute("UPDATE protocol_outbox SET state=%s,evidence=%s WHERE id=%s",
+                           ('rejected' if proofs['state'] == 'uncertain' else 'cancelled', Json(evidence), proofs['id']))
+    return True
+
+
 def _lifespan(observation, challenge):
     return _integer(observation['start']['block']['config']['challenges'][challenge]['lifespan_period'],
                     'challenge lifetime', 1)
@@ -332,8 +404,9 @@ def reconcile_block(database, block_id, player_id, *, artifact_origin=None, subm
                 benchmarks.record_outcome(database,row["id"],"active",height=proof["details"]["block_active"],evidence=evidence)
         elif not any(identity in records for records in feed.values()):
             if not _expire_unsent_results(database, row, observation, snapshot) and \
-                    not _expire_rejected_results(database, row, observation, snapshot, submission_origin):
-                _expire_after_lifetime(database, row, observation, snapshot, player_id)
+                    not _expire_rejected_results(database, row, observation, snapshot, submission_origin) and \
+                    not _expire_after_lifetime(database, row, observation, snapshot, player_id):
+                _expire_unconfirmed_results(database, row, observation, snapshot, player_id)
     return evidence
 
 
