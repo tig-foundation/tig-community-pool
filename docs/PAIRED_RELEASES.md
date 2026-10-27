@@ -78,8 +78,11 @@ token; the installer prompts privately for it. Hardware compatibility is
 checked before an installed worker can request work.
 
 The worker installer verifies that its own bytes match the current manifest,
-and that the fetched worker tag resolves to the full recorded commit. It also
-checks the installer inside that checkout. Restarts use the installed detached
+and that the fetched worker tag resolves to the full recorded commit. It fetches
+that tag from the repository the manifest names, so a release with a new worker
+pair must publish the tag there (today the former repository listed in
+[ROADMAP.md](ROADMAP.md)), or every member update stops with "installation
+command failed: git". It also checks the installer inside that checkout. Restarts use the installed detached
 revision and make no Git network requests. Explicit updates preserve the
 member's configuration, token and all saved benchmark evidence. They require
 the worker to stop and SQLite requests to finish; they do not discard unresolved
