@@ -83,6 +83,9 @@ member APIs:
    final `nonreproducible` nonce report, forfeits its stored hold to creation
    round X. `reproducible` and final `inconclusive` decisions are not upheld
    reports. A pending decision keeps that benchmark's hold in place.
+   The operator may return part or all of a finished benchmark's hold before
+   that (`benchmarks.release_collateral`), recorded in the ledger with actor
+   and reason; finalization then settles only the hold's remaining balance.
 4. `settlement.declare_earnings` records final expected net receipts and any
    operating charges withheld by TIG. This declaration creates no spendable
    funds. A chain adapter must first verify and record actual incoming token

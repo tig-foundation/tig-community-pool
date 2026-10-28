@@ -139,6 +139,23 @@ $('change-wallet').addEventListener('click',()=>{
 });
 for (const [id,change] of [['member-newer',-50],['member-older',50]]) $(id).addEventListener('click',()=>run(async()=>{memberOffset=Math.max(0,memberOffset+change);await loadMember();}));
 $('operator-login').addEventListener('submit',event=>{event.preventDefault();run(async()=>{token=$('operator-token').value;try{await loadOperator();$('operator-token').value='';}catch(error){token='';throw error;}});});
+let operatorHolds=[],holdsFilter=null;
+function renderHolds() {
+  const rows=operatorHolds.filter(row=>!holdsFilter||row.member_id===holdsFilter);
+  $('holds-filter').hidden=!holdsFilter;$('holds-filter').textContent=holdsFilter?'One member · click Holds again for all':'';
+  table('operator-holds',rows.map(row=>{
+    const actions=node('div');
+    const finalize=button('Finalize',async()=>{await api('operator/collateral/'+row.id+'/finalize',{});await loadOperator();});finalize.disabled=!capabilities.settlement_enabled;
+    const release=button('Release',()=>releaseCollateral(row));release.disabled=row.slot_held||BigInt(row.held)===0n;
+    actions.append(finalize,release);
+    return[address(row.benchmark_id),address(row.wallet),row.creation_round,status(row.state),row.handed_over_at?'Yes':'No',tig(row.held),actions];
+  }),7,holdsFilter?'This member has no held collateral.':'No collateral is held.');
+}
+function releaseCollateral(row) {
+  dialog('Release collateral early',short(row.wallet)+' · '+tig(row.held)+' TIG held for benchmark '+short(row.benchmark_id)+' ('+status(row.state)+'). The amount moves to the member\'s available funds now and is recorded with your reason; any remainder follows normal finalization.','Release collateral',async()=>{
+    await api('operator/collateral/'+row.id+'/release',{amount:units($('release-amount').value.trim()),reason:$('release-reason').value.trim(),event_key:key()});await loadOperator();notice('Collateral released to the member\'s available funds.');
+  });field('Amount · TIG','release-amount',tig(row.held));field('Reason','release-reason');
+}
 function editMultiplier(member) {
   dialog('Set collateral multiplier',member.wallet+' · applies to new benchmarks only. Existing holds are unchanged.','Save multiplier',async()=>{
     await api('operator/members/'+member.id+'/multiplier',{multiplier:$('new-multiplier').value.trim(),reason:$('change-reason').value.trim(),event_key:key()});await loadOperator();notice('New multiplier saved. Existing benchmark holds keep their original amount.');
@@ -211,11 +228,12 @@ async function loadOperator() {
   table('operator-topups',funding.topups.map(row=>{const actions=node('div');if(row.state==='uncertain')actions.append(button('Check transfer',async()=>showPayment(await api('operator/topups/'+row.id),true)));if(row.state==='awaiting_protocol')actions.append(button('Check TIG credit',async()=>{await api('operator/topups/'+row.id+'/confirm',{});await loadOperator();notice('TIG top-up confirmed and credited once.');}));return[date(row.sent_at),tig(row.amount),status(row.state),actions];}),4,'No fee top-ups recorded.');
   $('pause-work').textContent=capabilities.new_work_paused?'Resume new work':'Pause new work';
   $('settlement-status').textContent=capabilities.settlement_enabled?'Preview each round before crediting its final allocation.':'Live settlement is awaiting verified protocol configuration. Previews remain available when the evidence is complete.';
-  table('operator-members',data.members.map(row=>[address(row.wallet),tig(row.available),tig(row.collateral),row.slots+' / 2',row.multiplier+'×',button('Edit multiplier',()=>editMultiplier(row))]),6);
+  table('operator-members',data.members.map(row=>{const actions=node('div');actions.append(button('Edit multiplier',()=>editMultiplier(row)),button('Holds',()=>{holdsFilter=holdsFilter===row.id?null:row.id;renderHolds();}));return[address(row.wallet),tig(row.available),tig(row.collateral),row.slots+' / 2',row.multiplier+'×',actions];}),6);
   table('runtime-images',(images?.images||[]).map(row=>{const cell=node('span',row.image.split('@sha256:')[1].slice(0,12)+'…','mono');cell.title=row.image;return[row.challenge_id,row.challenge_name,cell,date(row.resolved_at)];}),4,images?'No runtime image is pinned yet. The coordinator pins the registry image of each active challenge at TIG runtime version '+images.runtime_version+'.':'The pool serves no paired release yet.');
   table('operator-withdrawals',payments.withdrawals.map(row=>{const actions=node('div');if(row.state==='requested')actions.append(button('Approve',()=>reviewWithdrawal(row,true)),button('Reject',()=>reviewWithdrawal(row,false),'danger'));if(row.state==='approved'){const prepare=button('Prepare payment',()=>prepareWithdrawal(row));prepare.disabled=!directWallet;actions.append(prepare,button('Reject',()=>reviewWithdrawal(row,false),'danger'));}if(row.state==='uncertain'){const attempt=payments.attempts.find(value=>value.withdrawal_id===row.id&&!value.outcome);if(attempt)actions.append(button('Check transfer',async()=>showPayment(await api('operator/withdrawal-attempts/'+attempt.id))));}return[row.kind==='operator'?'Operator income':address(row.wallet),tig(row.amount),address(row.recipient),status(row.state),actions];}),5);
   table('operator-rounds',data.rounds.map(row=>[row.round,row.credited_blocks+' / '+row.observed_blocks+' observed'+(row.missing_blocks?' · '+row.missing_blocks+' missing ('+row.gap_state+')':''),row.pending_collateral,row.pot===null?'—':tig(row.pot),row.settled_at?'Settled':'Awaiting finalization',button(row.settled_at?'View allocation':'Preview',()=>previewRound(row))]),6);
-  table('operator-holds',data.collateral.map(row=>{const finalize=button('Finalize',async()=>{await api('operator/collateral/'+row.id+'/finalize',{});await loadOperator();});finalize.disabled=!capabilities.settlement_enabled;return[address(row.benchmark_id),row.creation_round,status(row.state),row.handed_over_at?'Yes':'No',tig(row.amount),finalize];}),6);
+  operatorHolds=data.collateral;renderHolds();
+  table('collateral-releases',data.collateral_releases.map(row=>[address(row.wallet),address(row.details.benchmark_id),tig(row.details.amount),row.details.reason,date(row.created_at)]),5,'No early releases recorded.');
   for(const [id,items] of [['uncertain-submissions',data.uncertain_submissions.map(row=>[row.kind+' · '+short(row.benchmark_id),'Awaiting authoritative protocol confirmation since '+date(row.sent_at)])],['observation-alerts',data.alerts.map(row=>[row.kind+(row.resolved?' (resolved)':'')+' · block '+(row.height??'unknown'),row.resolved?'Resolved '+date(row.resolved_at)+' · '+row.resolution_reason:date(row.created_at)])]]) {$(id).replaceChildren();for(const [title,text]of items){const item=node('div',undefined,'alert-item');item.append(node('strong',title),node('span',text));$(id).append(item);}if(!items.length)$(id).append(node('p','No records to show.','muted small'));}
   table('multiplier-history',data.multiplier_changes.map(row=>[address(row.member_id),row.old_value+'×',row.new_value+'×',row.reason,date(row.created_at)]),5);
   $('operator-page-number').textContent='Page '+(operatorOffset/50+1);$('operator-newer').disabled=operatorOffset===0;$('operator-older').disabled=data.members.length<50&&data.collateral.length<50;

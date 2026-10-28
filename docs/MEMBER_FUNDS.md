@@ -105,6 +105,8 @@ expiry and collateral rules as an explicitly rejected late result. Validated
 elapsed-lifetime evidence and durable proof that no result was sent free the
 slot; they leave the original hold intact for X+2 finalization. A never-active
 handed-over benchmark forfeits that hold once to its creation round's pot.
+The operator can return part or all of a finished benchmark's hold earlier,
+as a recorded decision with a reason.
 Possibly sent results remain pending for reconciliation; submission fees still
 belong to the operator. See [submission recovery](SUBMISSION_RECOVERY.md).
 The [settlement increment](ROUND_SETTLEMENT.md) implements X+2 collateral

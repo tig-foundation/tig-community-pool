@@ -206,6 +206,19 @@ class SettlementTests(DatabaseCase):
         self.assertIsNone(self.row("SELECT journal_id FROM collateral_finalizations WHERE reservation_id=%s", (zero["id"],))["journal_id"])
         self.assertEqual(self.balance()["available"], 250*TIG)
 
+    def test_early_partial_release_leaves_only_the_remainder_to_finalize(self):
+        handed = self.benchmark("handed", outcome="expired")
+        amount = int(handed["amount"])
+        released = benchmarks.release_collateral(self.db, handed["id"], amount=amount // 5, actor="operator",
+                                                 reason="partial goodwill before finalization", event_key="early-handed")
+        self.assertEqual((released["released"], released["remaining_held"]), (amount // 5, amount - amount // 5))
+        seal = self.seal()
+        final = settlement.finalize_collateral(self.db, handed["id"], seal["id"])
+        self.assertEqual((final["outcome"], int(final["amount"])), ("forfeited", amount - amount // 5))
+        self.assertEqual(self.row("SELECT balance FROM accounts WHERE id='round:3'")["balance"], amount - amount // 5)
+        self.assertEqual(self.balance()["available"], 300*TIG - amount + amount // 5)
+        self.assertEqual(self.row("SELECT balance FROM accounts WHERE id=%s", (benchmarks.held(handed["id"]),))["balance"], 0)
+
     def test_pending_report_holds_only_its_benchmark_and_can_finish_after_restart(self):
         pending = self.benchmark("pending")
         clear = self.benchmark("clear")

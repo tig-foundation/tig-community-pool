@@ -82,8 +82,9 @@ def balances(database, member_id):
             raise FundsError("unknown member")
         cursor.execute("SELECT balance FROM accounts WHERE id=%s", (available(member_id),))
         result["available"] = int(cursor.fetchone()["balance"])
-        cursor.execute("""SELECT coalesce(sum(amount),0) AS collateral, count(*) FILTER (WHERE slot_held) AS slots
-            FROM reservations WHERE member_id=%s AND collateral_outcome IS NULL""", (member_id,))
+        # Held collateral is the balance of the member's hold accounts, so early partial releases show.
+        cursor.execute("""SELECT coalesce(sum(a.balance),0) AS collateral, count(*) FILTER (WHERE r.slot_held) AS slots
+            FROM reservations r LEFT JOIN accounts a ON a.id='collateral:'||r.id WHERE r.member_id=%s""", (member_id,))
         result.update({key: int(value) for key, value in cursor.fetchone().items()})
         cursor.execute("""SELECT coalesce(sum(amount),0) AS pending FROM withdrawals
             WHERE member_id=%s AND state IN ('requested','approved','uncertain')""", (member_id,))
