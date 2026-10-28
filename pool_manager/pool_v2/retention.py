@@ -459,14 +459,24 @@ def run(database, *, proof, policy=POLICY, now=None, spools=(), capture_spools=(
             cursor.execute("DELETE FROM chunk_last_ref WHERE digest=ANY(%s)", (digests,))
             removed.extend(digests)
     counts["removed_chunks"] = len(removed)
-    with database.transaction() as cursor:
-        _session(cursor)
-        cursor.execute('''UPDATE compact_block_copies c SET compressed_payload=''::bytea,expired_at=%s
-            FROM observed_blocks b WHERE b.id=c.block_id AND b.height<=%s AND c.created_at<=%s
-            AND c.expired_at IS NULL AND NOT EXISTS (SELECT 1 FROM reservations r
-                WHERE r.selection->>'block_id'=c.block_id AND r.collateral_outcome IS NULL)''',
-            (now, target['block_height'], covered_until))
-        counts['expired_compact_copies'] = cursor.rowcount
+    # Bounded batches: the table's guard trigger re-checks reservations for every row it blanks,
+    # so one statement over a whole round's copies would exceed the statement timeout.
+    expired_copies = 0
+    while True:
+        with database.transaction() as cursor:
+            _session(cursor)
+            cursor.execute('''SELECT c.block_id FROM compact_block_copies c JOIN observed_blocks b ON b.id=c.block_id
+                WHERE b.height<=%s AND c.created_at<=%s AND c.expired_at IS NULL
+                AND NOT EXISTS (SELECT 1 FROM reservations r
+                    WHERE r.selection->>'block_id'=c.block_id AND r.collateral_outcome IS NULL)
+                ORDER BY b.height LIMIT %s''', (target['block_height'], covered_until, batch))
+            ids = [row['block_id'] for row in cursor.fetchall()]
+            if not ids:
+                break
+            cursor.execute('''UPDATE compact_block_copies SET compressed_payload=''::bytea,expired_at=%s
+                WHERE block_id=ANY(%s) AND expired_at IS NULL''', (now, ids))
+            expired_copies += cursor.rowcount
+    counts['expired_compact_copies'] = expired_copies
 
     tombstone = Json({"expired": {"run": str(run_id), "at": now.isoformat(), "policy": policy["version"]}})
 
