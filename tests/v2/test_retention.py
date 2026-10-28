@@ -3,13 +3,14 @@ from datetime import datetime, timedelta, timezone
 import gzip
 import hashlib
 import json
+import os
 from pathlib import Path
 import tempfile
 import uuid
 
 from psycopg2.extras import Json
 
-from pool_manager.pool_v2 import benchmarks, chain_observer, funding, retention
+from pool_manager.pool_v2 import benchmarks, chain_observer, funding, ledger, retention
 from pool_manager.pool_v2.block_observer import BlockStore, canonical_observation
 from pool_manager.pool_v2.money import FundsError
 from pool_manager.pool_v2.protocol import ProtocolDataError
@@ -269,6 +270,43 @@ class RetentionTests(DatabaseCase):
             for path in (Path(directory) / "recorded").glob("*.json.gz"):
                 spool.read(path)
 
+    def test_capture_spool_prune_removes_only_archives_whose_row_expired(self):
+        old = datetime.now(timezone.utc) - timedelta(days=40)
+        captures = {name: {"capture": name, "checked_at": old.isoformat()} for name in ("old", "new", "unrecorded")}
+        identities = {name: hashlib.sha256(ledger.canonical(data).encode()).hexdigest() for name, data in captures.items()}
+        with self.db.transaction() as cursor:
+            for name, when in (("old", old), ("new", datetime.now(timezone.utc))):
+                cursor.execute("INSERT INTO funding_captures(id,payload_gzip,player_id,checked_at,complete,created_at) VALUES (%s,%s,%s,%s,true,%s)",
+                               (identities[name], gzip.compress(ledger.canonical(captures[name]).encode()), PLAYER, when, when))
+            cursor.execute("INSERT INTO chain_captures(id,payload_gzip,created_at) VALUES (%s,%s,%s)",
+                           (identities["old"], gzip.compress(b"{}"), old))
+        with tempfile.TemporaryDirectory() as directory:
+            spool = Spool(directory)
+            paths = {}
+            for name, data in captures.items():
+                path = spool.save(data, {"purpose": "public-protocol-funding"})
+                spool.recorded(path)
+                paths[name] = Path(directory) / "recorded" / Path(path).name
+                if name != "new":
+                    os.utime(paths[name], (old.timestamp(), old.timestamp()))
+            pending = Path(spool.save({"capture": "pending", "checked_at": old.isoformat()}, {"purpose": "public-protocol-funding"}))
+            os.utime(pending, (old.timestamp(), old.timestamp()))
+            with self.assertRaisesRegex(ProtocolDataError, "capture spool"):
+                retention.prune_capture_spool(self.db, directory, "report_captures",
+                                              capture_cutoff=datetime.now(timezone.utc), covered_until=datetime.now(timezone.utc))
+            record = retention.run(self.db, proof=self.proof(), capture_spools=[("funding_captures", directory)])
+            counts = record["counts"]["capture-spool:funding_captures:" + directory]
+            # The old row expired in this run, so its archive went; the young row keeps its payload and file,
+            # the file without a row stays, the pending file is never touched, and the young file was not opened.
+            self.assertEqual(counts, {"archives": 1, "kept_unrecorded": 1, "skipped_recent": 1})
+            self.assertFalse(paths["old"].exists())
+            self.assertTrue(paths["new"].exists() and paths["unrecorded"].exists() and pending.exists())
+            expired = {row["id"] for row in self.rows("SELECT id FROM funding_captures WHERE expired_at IS NOT NULL")}
+            self.assertEqual(expired, {identities["old"]})
+            # A second run has nothing left to remove.
+            again = retention.run(self.db, proof=self.proof(), capture_spools=[("funding_captures", directory)])
+            self.assertEqual(again["counts"]["capture-spool:funding_captures:" + directory]["archives"], 0)
+
     def test_tolerated_missing_height_lets_the_raw_floor_advance(self):
         self.record((8, 10, 11))   # Height 9 is a tolerated gap under the default policy.
         self.record(range(12, 32))
@@ -276,3 +314,44 @@ class RetentionTests(DatabaseCase):
         self.assertEqual(record["floors"]["block_height"], 15)
         self.assertFalse(any("credit coverage" in note for note in record["notes"]), record["notes"])
         self.assertEqual(self.store.status()["missing_by_round"][0]["state"], "tolerated")
+
+
+class PartialLaunchRoundTests(DatabaseCase):
+    """The pool launched inside round 3 of the fixture: heights 8 and 9 were never observed."""
+
+    def setUp(self):
+        super().setUp()
+        self.store = BlockStore(self.db)
+        self.store.initialize(10)
+        self.fund()
+        row = benchmarks.reserve(self.db, self.member, "owned", creation_round=1, resource="CPU",
+            selection={"block_id": "block-1"}, payload={"track_settings": {"t": {"num_bundles": 2}}},
+            fee_limit=0, offer_expires_at=self.expiry)
+        benchmarks.mark_submitting(self.db, row["id"])
+        row = benchmarks.accept(self.db, row["id"], "b", {"benchmark_id": "b"}, actual_fee=0, evidence={"fixture": True})
+        benchmarks.acknowledge(self.db, row["id"], self.member, row["assignment_digest"])
+
+    def test_partial_launch_round_does_not_hold_the_raw_floor(self):
+        # A strict tolerance makes the two unobserved pre-launch heights hold round 3, as the
+        # thousands of pre-launch heights of a real launch round do under any tolerance.
+        self.store.set_gap_policy(max_missing_per_round=0, warn_missing_per_round=0, actor="fixture", reason="strict")
+        for height in range(10, 32):
+            result = self.store.record(observation(height), collector="one")
+            self.assertTrue(result["complete"], result)
+            credit_block(self.db, result["block_id"], PLAYER)
+        self.assertFalse(self.store.round_coverage(3))  # The launch round itself can never be complete.
+        now = datetime.now(timezone.utc)
+        proof = {"snapshot": now.strftime("%Y-%m-%dT%H%M%SZ"), "completed_at_utc": now.isoformat(),
+                 "covered_until": now.isoformat(), "source_host": "test", "files": {}}
+        record = retention.run(self.db, proof=proof)
+        # Current round 8, cap 4: the floor starts at round 4, the first round that begins after
+        # launch, and reaches its end; the launch round's observed blocks 10 and 11 expire with it.
+        self.assertEqual(record["floors"]["block_height"], 15)
+        self.assertFalse(any("credit coverage" in note for note in record["notes"]), record["notes"])
+        self.assertEqual(record["counts"]["expired_capture_manifests"], 6)
+        with self.assertRaisesRegex(ProtocolDataError, "expired under the retention policy"):
+            self.store.read("block-10")
+        self.assertEqual(self.store.read("block-16")[0], canonical_observation(observation(16)))
+        with self.db.transaction() as cursor:
+            cursor.execute("SELECT count(*) AS n FROM credited_blocks")
+            self.assertEqual(cursor.fetchone()["n"], 22)
