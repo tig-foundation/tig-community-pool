@@ -307,6 +307,25 @@ class RetentionTests(DatabaseCase):
             again = retention.run(self.db, proof=self.proof(), capture_spools=[("funding_captures", directory)])
             self.assertEqual(again["counts"]["capture-spool:funding_captures:" + directory]["archives"], 0)
 
+    def test_compact_copies_under_the_floor_expire_in_bounded_batches(self):
+        self.record(range(8, 32))
+        with self.db.transaction() as cursor:
+            cursor.execute("DELETE FROM compact_block_copies")
+            for height in range(8, 32):
+                cursor.execute("""INSERT INTO compact_block_copies(block_id,source_semantic_digest,projection_digest,payload_sha256,compressed_payload)
+                    VALUES (%s,%s,%s,%s,%s)""", (f"block-{height}", "a" * 64, "b" * 64, "c" * 64, gzip.compress(b"{}")))
+        record = retention.run(self.db, proof=self.proof(), batch=5)
+        # Rounds 3 and 4 (heights 8..15) are under the floor: eight copies, blanked five at a time.
+        self.assertEqual(record["floors"]["block_height"], 15)
+        self.assertEqual(record["counts"]["expired_compact_copies"], 8)
+        rows = self.rows("SELECT block_id,expired_at IS NOT NULL AS expired,length(compressed_payload) AS size FROM compact_block_copies ORDER BY block_id")
+        expired = {row["block_id"] for row in rows if row["expired"]}
+        self.assertEqual(expired, {f"block-{height}" for height in range(8, 16)})
+        self.assertTrue(all(row["size"] == 0 for row in rows if row["expired"]))
+        self.assertTrue(all(row["size"] > 0 for row in rows if not row["expired"]))
+        again = retention.run(self.db, proof=self.proof(), batch=5)
+        self.assertEqual(again["counts"]["expired_compact_copies"], 0)
+
     def test_tolerated_missing_height_lets_the_raw_floor_advance(self):
         self.record((8, 10, 11))   # Height 9 is a tolerated gap under the default policy.
         self.record(range(12, 32))
