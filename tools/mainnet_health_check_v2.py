@@ -1,4 +1,4 @@
-"""Local preparation health record and disk guard for a mainnet host; no external notifications.
+"""Local health record and disk guard for a mainnet host; no external notifications.
 
 Installed as /opt/innopool-v2-mainnet/operations/mainnet_health_check.py and run by
 innopoolv2mainnet-health.service every five minutes. Block history is judged by
@@ -104,8 +104,6 @@ def main():
         issues.extend(spending_issues(record['spending']))
         with database.transaction() as cursor:
             record['ledger_audit'] = ledger.audit(cursor)
-        if not record['new_work_paused']:
-            issues.append('preparation database no longer has the recorded work pause')
         if record['ledger_audit']:
             issues.append('ledger audit requires attention')
         issues.extend(block_issues(record['blocks'], time.time()))

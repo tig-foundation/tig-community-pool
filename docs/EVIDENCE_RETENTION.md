@@ -24,7 +24,7 @@ records remain.
 | Raw block captures (database manifests and chunks, spool archives) | Round X is settled, and never before round X+2 has ended | 4 rounds, even while settlement is disabled |
 | Whole-network selection references | Under the raw block floor; never one a reservation cites, nor the newest | 4 rounds |
 | Fraud-report captures and report indices | Every pool benchmark created up to that round has its collateral outcome, and the round is at least three rounds old | 4 rounds |
-| Wallet (custody) and fee-balance captures | Older than 30 days | 30 days |
+| Wallet (custody) and fee-balance captures, and their recorded spool archives | Older than 30 days; a spool archive goes once its database row has expired | 30 days |
 | Database backups | Unchanged: three verified bases plus the WAL since the oldest | about 3 days |
 
 What never expires, whatever the cap:
@@ -33,6 +33,10 @@ What never expires, whatever the cap:
   that round and says so. Recover and validate the actual missing capture
   before crediting it. The one-time prelaunch waiver requires a recorded pause
   and no existing reservations; it is not a general way to fill later gaps.
+  The partial launch round is the one exception: heights before the launch
+  height were never observed, so the raw floor starts at the first round that
+  begins at or after launch, and the launch round's observed blocks expire
+  under that floor with their credits kept.
 - Anything captured after the most recent verified base backup started.
 - A capture cited by a confirmed report, arbitration, round seal, benchmark
   reporting round, fee top-up, funding alert, opening credit or custody
@@ -61,7 +65,11 @@ admin DSN. It:
    blanks report, funding, custody and network reference payloads under their
    floors, and prunes
    the local block spool (archives under the floor, chunk files the database
-   removed, never a chunk a pending archive still needs).
+   removed, never a chunk a pending archive still needs). With
+   `--capture-spool funding_captures=DIR` or `chain_captures=DIR` it also
+   removes recorded funding or custody archives whose database row has expired
+   in this or an earlier run; a file without a row, or whose row keeps its
+   payload, stays, and files younger than the cutoff are not opened.
 4. Appends a `retention_runs` row with the policy, proof, floors, counts and
    notes.
 
@@ -102,7 +110,8 @@ chunks expire only once every block up to it has.
   fetched for open obligations after the X+2 reporting window closes.
 - Both block and report spools have guarded file pruning. Recorded report
   files require a matching backed database payload and scope; pending files
-  remain. Custody/funding spool cleanup retains its existing controls.
+  remain. Funding and custody spool archives are removed by the run's `--capture-spool` step
+  once their database row has expired; nothing else prunes those spools.
 - Recovery collectors are inactive by default, and the raw copy of the
   primary's evidence spool is an optional feature that is disabled by default;
   do not assume that a separate raw archive exists on the recovery host unless

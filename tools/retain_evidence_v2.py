@@ -25,6 +25,8 @@ def main(argv=None):
     parser.add_argument("--max-proof-age-hours", type=float, default=36)
     parser.add_argument("--policy", help="JSON file overriding retention.POLICY values")
     parser.add_argument("--spool", action="append", default=[], help="a block spool directory on this host to prune too")
+    parser.add_argument("--capture-spool", action="append", default=[], metavar="TABLE=DIRECTORY",
+                        help="a funding_captures or chain_captures spool whose recorded archives are removed once their row expired")
     parser.add_argument("--max-blocks", type=int, default=5000, help="capture manifests to expire per run")
     parser.add_argument("--dry-run", action="store_true", help="report the floors a run would set; change nothing")
     parser.add_argument("--initialize-chunk-index", action="store_true",
@@ -44,8 +46,14 @@ def main(argv=None):
         proof = {"snapshot": None, "completed_at_utc": None, "covered_until": now.isoformat(), "source_host": None, "files": None}
     else:
         parser.error("--backup-proof is required unless --dry-run")
+    capture_spools = []
+    for value in args.capture_spool:
+        table, separator, directory = value.partition("=")
+        if not separator or table not in retention.CAPTURE_SPOOL_TABLES or not directory:
+            parser.error("--capture-spool takes funding_captures=DIRECTORY or chain_captures=DIRECTORY")
+        capture_spools.append((table, directory))
     record = retention.run(database, proof=proof, policy=policy, now=now, spools=args.spool,
-                           dry_run=args.dry_run, max_blocks=args.max_blocks)
+                           capture_spools=capture_spools, dry_run=args.dry_run, max_blocks=args.max_blocks)
     print(json.dumps(record, default=str), flush=True)
     return 0
 

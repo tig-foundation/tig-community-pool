@@ -17,6 +17,7 @@ import uuid
 
 from psycopg2.extras import Json
 
+from . import ledger
 from .block_observer import BlockStore, _is_digest, manifest_references
 from .database import lock
 from .observation import canonical_json, read_archive
@@ -69,7 +70,12 @@ def plan(database, cursor, policy, covered_until, now, notes):
     cursor.execute("SELECT coalesce(max(height),-1) AS height FROM observed_blocks WHERE captured_at<=%s", (covered_until,))
     covered_height = cursor.fetchone()["height"]
     store = BlockStore(database)
-    first_round = max(launch // length + 1, (current["block_height"] + 1) // length + 1)
+    # The raw floor starts at the first round that begins at or after launch. The pool never
+    # observed the heights of a partial launch round before launch, so that round can never
+    # be complete and would otherwise hold the floor forever; its observed blocks expire
+    # under the next round's floor like any other, and their credits stay.
+    first_full_round = -(-launch // length) + 1
+    first_round = max(first_full_round, (current["block_height"] + 1) // length + 1)
     for round_number in range(first_round, current_round):
         capped = round_number <= current_round - policy["raw_block_rounds"]
         settled_ok = round_number in settled and current_round >= round_number + policy["settled_margin_rounds"]
@@ -342,7 +348,57 @@ def _session(cursor):
     cursor.execute("SET LOCAL pool_v2.retention TO 'on'")
 
 
-def run(database, *, proof, policy=POLICY, now=None, spools=(), dry_run=False, batch=200, max_blocks=5000):
+CAPTURE_SPOOL_TABLES = ("funding_captures", "chain_captures")
+
+
+def prune_capture_spool(database, directory, table, *, capture_cutoff, covered_until):
+    """Remove recorded wallet/fee or custody archives whose database payload has expired.
+
+    A funding or custody spool archive is the fsynced raw copy of one capture row,
+    keyed by the same content digest the recorder used for the row id. The file goes
+    only when its row exists and is expired under the policy; a file without a row
+    (never recorded) or whose row still holds its payload (cited, newest, or young)
+    stays. Files written after the cutoff are not even opened.
+    """
+    if table not in CAPTURE_SPOOL_TABLES:
+        raise ProtocolDataError("capture spool pruning supports only funding and custody capture tables")
+    directory = Path(directory)
+    spool = Spool(directory)
+    counts = {"archives": 0, "kept_unrecorded": 0, "skipped_recent": 0}
+    cutoff = min(capture_cutoff, covered_until).timestamp()
+
+    def decide(candidates):
+        with database.transaction() as cursor:
+            cursor.execute("SET TRANSACTION READ ONLY")
+            cursor.execute(f"SELECT id, expired_at IS NOT NULL AS expired FROM {table} WHERE id=ANY(%s)", (sorted(candidates),))
+            rows = {row["id"]: row["expired"] for row in cursor.fetchall()}
+        for identity, path in candidates.items():
+            if identity not in rows:
+                counts["kept_unrecorded"] += 1
+            elif rows[identity]:
+                path.unlink()
+                counts["archives"] += 1
+
+    with pruning_lock(directory):
+        candidates = {}
+        for path in sorted((directory / "recorded").glob("*.json.gz")):
+            try:
+                if path.stat().st_mtime > cutoff:
+                    counts["skipped_recent"] += 1
+                    continue
+                data, _, _ = spool.read(path)
+            except FileNotFoundError:
+                continue
+            candidates[hashlib.sha256(ledger.canonical(data).encode()).hexdigest()] = path
+            if len(candidates) >= 500:
+                decide(candidates)
+                candidates = {}
+        if candidates:
+            decide(candidates)
+    return counts
+
+
+def run(database, *, proof, policy=POLICY, now=None, spools=(), capture_spools=(), dry_run=False, batch=200, max_blocks=5000):
     now = now or datetime.now(timezone.utc)
     covered_until = parse_time(proof["covered_until"])
     run_id, notes, counts = uuid.uuid4(), [], {}
@@ -487,6 +543,9 @@ def run(database, *, proof, policy=POLICY, now=None, spools=(), dry_run=False, b
     for spool in spools:
         counts["spool:" + str(spool)] = prune_spool(spool, block_floor=target["block_height"],
             capture_cutoff=target["capture_cutoff"], covered_until=covered_until, removed_digests=removed)
+    for table, directory in capture_spools:
+        counts["capture-spool:" + table + ":" + str(directory)] = prune_capture_spool(
+            database, directory, table, capture_cutoff=capture_cutoff, covered_until=covered_until)
 
     record = {"id": str(run_id), "policy": policy, "backup_proof": proof, "floors": floors, "counts": counts,
               "notes": notes, "head": head, "at": now.isoformat()}

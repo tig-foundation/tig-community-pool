@@ -11,5 +11,5 @@ Nice=10
 Type=oneshot
 EnvironmentFile=/etc/innopool-v2-mainnet/retention.env
 WorkingDirectory=/opt/innopool-v2-mainnet/releases/REPLACE_TESTED_POOL_COMMIT
-ExecStart=/opt/innopool-v2-mainnet/venv/bin/python tools/retain_evidence_v2.py --backup-proof /var/lib/innopool-v2-mainnet/backup-proof/latest.json --spool /var/lib/innopool-v2-mainnet/spool/blocks
+ExecStart=/opt/innopool-v2-mainnet/venv/bin/python tools/retain_evidence_v2.py --backup-proof /var/lib/innopool-v2-mainnet/backup-proof/latest.json --spool /var/lib/innopool-v2-mainnet/spool/blocks --capture-spool funding_captures=/var/lib/innopool-v2-mainnet/spool/funding --capture-spool chain_captures=/var/lib/innopool-v2-mainnet/spool/custody
 TimeoutStartSec=2h
