@@ -91,6 +91,10 @@ class WithdrawalRelease(WithdrawalReview):
     event_key: StrictStr = Field(min_length=1, max_length=128)
 
 
+class CollateralRelease(WithdrawalRelease):
+    amount: StrictStr = Field(pattern=r"^[1-9][0-9]{0,77}$")
+
+
 class WithdrawalSend(Input):
     request_key: StrictStr = Field(min_length=1, max_length=128)
     fee_limit: StrictStr = Field(pattern=r"^[1-9][0-9]{0,77}$")
@@ -563,6 +567,11 @@ def create_app(settings):
         row=benchmarks.release_unhanded(database,identity,actor=actor,reason=body.reason,event_key=body.event_key)
         return response({'reservation_id':str(row['id']),'benchmark_id':row['benchmark_id'],
             'state':row['state'],'collateral_outcome':row['collateral_outcome'],'amount':str(row['amount'])})
+
+    @app.post('/api/v2/operator/collateral/{identity}/release')
+    def release_collateral_early(identity:uuid.UUID,body:CollateralRelease,actor=Depends(operator)):
+        result=benchmarks.release_collateral(database,identity,amount=int(body.amount),actor=actor,reason=body.reason,event_key=body.event_key)
+        return response({key:(None if value is None else str(value)) for key,value in result.items()})
 
     @app.get("/api/v2/member/journal")
     def journal(member_id=Depends(principal), limit: int = 100):

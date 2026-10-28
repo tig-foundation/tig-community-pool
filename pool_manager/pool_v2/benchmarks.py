@@ -245,6 +245,53 @@ def release_unhanded(database, identity, *, actor, reason, event_key):
         return _row(cursor, identity)
 
 
+FINISHED = ("active", "verification_failed", "expired", "rejected", "cancelled")
+
+
+def release_collateral(database, identity, *, amount, actor, reason, event_key):
+    """Return part or all of a finished benchmark's hold to the member before finalization.
+
+    Normal finalization waits for the creation round's arbitration period and may
+    forfeit the hold; this records the operator's explicit decision instead, in the
+    ledger and the reservation's events, with actor and reason. The hold's account
+    balance is the truth: a partial release leaves the remainder for finalization,
+    and a complete release closes the hold as returned. The benchmark must have a
+    definitive outcome; work still in flight keeps its hold.
+    """
+    if not actor or not reason or not event_key:
+        raise FundsError("an early collateral release requires an operator, reason and event key")
+    if type(amount) is not int or amount <= 0:
+        raise FundsError("release a positive whole number of token units")
+    key = f"collateral:{identity}:operator-release:{event_key}"
+    with database.transaction() as cursor:
+        row = _locked(cursor, identity)
+        cursor.execute("SELECT balance FROM accounts WHERE id=%s FOR UPDATE", (held(identity),))
+        account = cursor.fetchone()
+        balance = int(account["balance"]) if account else 0
+        evidence = {"actor": actor, "reason": reason, "event_key": event_key, "early_release": True,
+                    "reservation_id": str(identity), "benchmark_id": row["benchmark_id"],
+                    "creation_round": row["creation_round"], "state": row["state"], "amount": str(amount)}
+        cursor.execute("SELECT id FROM journals WHERE event_key=%s", (key,))
+        if not cursor.fetchone():
+            if row["collateral_outcome"] is not None:
+                raise Conflict("this hold was already finalized or returned")
+            if row["slot_held"] or row["state"] not in FINISHED:
+                raise Conflict("the benchmark is still in flight; wait for its definitive outcome before releasing its hold")
+            if amount > balance:
+                raise Conflict("release amount exceeds the held collateral")
+        # A retry with the same key and inputs returns the recorded journal; different inputs are refused.
+        journal_id = ledger.post(cursor, key, "collateral_return",
+                                 [(held(identity), -amount), (available(row["member_id"]), amount)], evidence)
+        cursor.execute("SELECT balance FROM accounts WHERE id=%s", (held(identity),))
+        remaining = int(cursor.fetchone()["balance"])
+        if remaining == 0 and row["collateral_outcome"] is None:
+            cursor.execute("UPDATE reservations SET collateral_outcome='returned' WHERE id=%s", (identity,))
+        event(cursor, identity, "operator_release:" + event_key, evidence)
+        return {"reservation_id": identity, "member_id": row["member_id"], "benchmark_id": row["benchmark_id"],
+                "released": amount, "remaining_held": remaining,
+                "collateral_outcome": "returned" if remaining == 0 else row["collateral_outcome"], "journal_id": journal_id}
+
+
 def acknowledge(database, identity, member_id, digest):
     with database.transaction() as cursor:
         row = _locked(cursor, identity)

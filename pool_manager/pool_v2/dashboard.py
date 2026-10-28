@@ -18,10 +18,11 @@ def member(database,member_id,*,limit=50,offset=0):
     balance=members.balances(database,member_id)
     for field in ('available','collateral','pending_withdrawals'):balance[field]=str(balance[field])
     with database.transaction() as cursor:
-        cursor.execute('''SELECT id,benchmark_id,creation_round,resource,state,slot_held,base_amount,multiplier,
-            multiplier_revision,amount,collateral_outcome,handed_over_at,created_at,
-            CASE WHEN collateral_outcome IS NULL THEN amount ELSE 0 END AS held
-            FROM reservations WHERE member_id=%s ORDER BY created_at DESC,id DESC LIMIT %s OFFSET %s''',
+        cursor.execute('''SELECT r.id,r.benchmark_id,r.creation_round,r.resource,r.state,r.slot_held,r.base_amount,r.multiplier,
+            r.multiplier_revision,r.amount,r.collateral_outcome,r.handed_over_at,r.created_at,
+            coalesce(a.balance,0) AS held
+            FROM reservations r LEFT JOIN accounts a ON a.id='collateral:'||r.id
+            WHERE r.member_id=%s ORDER BY r.created_at DESC,r.id DESC LIMIT %s OFFSET %s''',
             (member_id,limit,offset))
         assignments=cursor.fetchall()
         cursor.execute('''SELECT b.round,c.denominator,sum(c.numerator) AS numerator FROM benchmark_credits c
@@ -48,7 +49,7 @@ def operator(database,*,limit=50,offset=0):
     status=BlockStore(database).status()
     with database.transaction() as cursor:
         cursor.execute('''SELECT m.id,m.wallet,m.withdrawal_wallet,m.multiplier,m.multiplier_revision,a.balance AS available,
-            (SELECT coalesce(sum(amount),0) FROM reservations r WHERE r.member_id=m.id AND r.collateral_outcome IS NULL) AS collateral,
+            (SELECT coalesce(sum(h.balance),0) FROM reservations r JOIN accounts h ON h.id='collateral:'||r.id WHERE r.member_id=m.id) AS collateral,
             (SELECT count(*) FROM reservations r WHERE r.member_id=m.id AND r.slot_held) AS slots
             FROM members m JOIN accounts a ON a.id='member:'||m.id||':available'
             ORDER BY m.created_at DESC,m.id DESC LIMIT %s OFFSET %s''',(limit,offset))
@@ -77,12 +78,18 @@ def operator(database,*,limit=50,offset=0):
             gap=gaps.get(row['round'])
             row['missing_blocks']=gap['missing'] if gap else 0
             row['gap_state']=gap['state'] if gap else None
-        cursor.execute('''SELECT id,member_id,benchmark_id,creation_round,state,amount,base_amount,multiplier,handed_over_at
-            FROM reservations WHERE collateral_outcome IS NULL ORDER BY creation_round,created_at LIMIT %s OFFSET %s''',(limit,offset))
+        cursor.execute('''SELECT r.id,r.member_id,m.wallet,r.benchmark_id,r.creation_round,r.state,r.slot_held,r.amount,r.base_amount,
+            r.multiplier,r.handed_over_at,coalesce(a.balance,0) AS held
+            FROM reservations r JOIN members m ON m.id=r.member_id LEFT JOIN accounts a ON a.id='collateral:'||r.id
+            WHERE r.collateral_outcome IS NULL ORDER BY r.creation_round,r.created_at LIMIT %s OFFSET %s''',(limit,offset))
         holds=cursor.fetchall()
+        cursor.execute('''SELECT j.id,j.created_at,j.details,m.wallet FROM journals j
+            JOIN reservations r ON r.id::text=j.details->>'reservation_id' JOIN members m ON m.id=r.member_id
+            WHERE j.kind='collateral_return' AND j.details ? 'early_release' ORDER BY j.created_at DESC LIMIT 50''')
+        releases=cursor.fetchall()
         cursor.execute('SELECT * FROM multiplier_changes ORDER BY created_at DESC LIMIT 50')
         changes=cursor.fetchall()
         cursor.execute('SELECT * FROM custody_identity WHERE name=\'custody\'')
         return {'members':people,'balances':balances,'observation':status,'uncertain_submissions':pending,
-                'alerts':alerts,'rounds':rounds,'collateral':holds,'multiplier_changes':changes,
+                'alerts':alerts,'rounds':rounds,'collateral':holds,'collateral_releases':releases,'multiplier_changes':changes,
                 'custody':cursor.fetchone(),'limit':limit,'offset':offset}

@@ -47,6 +47,35 @@ class ApiTests(DatabaseCase):
         self.assertEqual(response.json()["new_value"], "0.4")
         self.assertEqual(self.client.post(path, json={**body, "multiplier": 0.4}, headers=operator_headers).status_code, 422)
 
+    def test_operator_releases_collateral_early_with_audit(self):
+        deposits.receive(self.db, transfer(sender=self.signer.address.lower(), amount=101*TIG+1))
+        row = self.reserve('early', member=self.member_id)
+        benchmarks.mark_submitting(self.db, row['id'])
+        row = benchmarks.accept(self.db, row['id'], 'bench-early',
+            {'benchmark_id': 'bench-early', 'settings': {'player_id': self.signer.address.lower(), 'challenge_id': 'c1'}, 'num_nonces': 16},
+            actual_fee=0, evidence={'source': 'fixture'})
+        row = benchmarks.acknowledge(self.db, row['id'], self.member_id, row['assignment_digest'])
+        row = benchmarks.record_outcome(self.db, row['id'], 'expired', height=40, evidence={'source': 'fixture'})
+        path = f"/api/v2/operator/collateral/{row['id']}/release"
+        part = int(row['amount']) // 2
+        body = {'amount': str(part), 'reason': 'operator mistake', 'event_key': 'early-1'}
+        operator_headers = {'Authorization': 'Bearer ' + self.operator}
+        self.assertEqual(self.client.post(path, json=body, headers=self.headers).status_code, 403)
+        self.assertEqual(self.client.post(path, json={**body, 'amount': '0'}, headers=operator_headers).status_code, 422)
+        self.assertEqual(self.client.post(path, json={**body, 'amount': '1.5'}, headers=operator_headers).status_code, 422)
+        result = self.client.post(path, json=body, headers=operator_headers)
+        self.assertEqual(result.status_code, 200, result.text)
+        self.assertEqual((result.json()['released'], result.json()['remaining_held'], result.json()['collateral_outcome']),
+                         (str(part), str(int(row['amount']) - part), None))
+        balance = self.client.get('/api/v2/member/balance', headers=self.headers).json()
+        self.assertEqual(balance['collateral'], str(int(row['amount']) - part))
+        self.assertEqual(balance['available'], str(101*TIG+1 - int(row['amount']) + part))
+        operator = self.client.get('/api/v2/operator/dashboard', headers=operator_headers).json()
+        self.assertEqual(len(operator['collateral_releases']), 1)
+        self.assertEqual(operator['collateral_releases'][0]['details']['reason'], 'operator mistake')
+        self.assertEqual(operator['collateral'][0]['held'], str(int(row['amount']) - part))
+        self.assertTrue(operator['collateral'][0]['wallet'])
+
     def test_execution_token_cannot_withdraw_but_wallet_session_can(self):
         deposits.receive(self.db, transfer(sender=self.signer.address.lower(), amount=10*TIG))
         body = {"amount": str(7*TIG), "request_key": "withdraw-1"}
