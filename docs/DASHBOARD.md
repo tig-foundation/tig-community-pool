@@ -54,6 +54,11 @@ showing the custody route. The page does not send or sign custody transactions.
 An uncertain attempt can be reopened and recovered from its recorded nonce;
 closing a dialog does not release funds or permit a second payment attempt.
 
+An operator can also return part or all of a finished benchmark's held
+collateral before finalization, with an audit reason; the page lists these
+releases with the member, benchmark, amount and reason. Work still in flight
+cannot be released.
+
 The submission funding panel shows the observed TIG fee balance alongside its
 recorded backing. The operator can reserve a manual fee top-up using available
 operator funds, recover its transaction, and check positive TIG credit. A

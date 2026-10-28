@@ -41,6 +41,7 @@ Use this table to decide where a task belongs:
 | Withdraw your available operator funds | Pool website → MetaMask → pool website | Operator income → Withdraw operator funds, then the normal payment procedure |
 | Change your income destination or retained operating budget | Server service configuration | Update the configured values and reload the API |
 | Finalize eligible collateral or credit a completed round | Pool website, after backend evidence is ready | Finalize; Preview → Credit this round |
+| Return a member's collateral before finalization | Pool website | Collateral awaiting finalization → Release (Members & collateral → Holds shows one member) |
 | Claim/unlock TIG protocol rewards | Wallet actions outside the pool, then manual receipt recording | No pool workflow for this; see [ROADMAP.md](ROADMAP.md) |
 | Rotate the operator token, TIG API key or database credentials | Protected server configuration | Coordinate service updates; keep secrets outside Git |
 | Enable mainnet funds, submissions or settlement | Server configuration and launch procedure | Explicit launch settings, evidence and budget |
@@ -291,6 +292,18 @@ Once settlement is enabled and the required final protocol outcomes are
 available, **Collateral awaiting finalization → Finalize** resolves an
 eligible benchmark's hold. Its creation-round arbitration period must be over;
 successful computation alone does not release collateral.
+
+**To return collateral early, record your decision on the website.**
+
+If a member's finished benchmark holds collateral that you want to give back
+before its finalization date, for example after a mistake, open **Collateral
+awaiting finalization** (or click **Holds** next to the member in **Members &
+collateral** to see only that member) and click **Release**. Enter the amount,
+up to the held TIG, and a reason. The amount moves to the member's available
+funds at once, and the ledger records the journal with your operator identity
+and reason; the member sees it in their journal. A partial release leaves the
+remainder for normal finalization, which may still forfeit it. Work that is
+still in flight cannot be released; wait for its definitive outcome.
 
 For a complete, funded reward round, use **Round settlement → Preview**, check
 the member allocations, then **Credit this round**. These actions update the

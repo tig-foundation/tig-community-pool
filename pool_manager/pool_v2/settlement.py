@@ -46,7 +46,10 @@ def finalize_collateral(database,reservation_id,seal_id):
             outcome='returned'
         else:
             outcome='forfeited' if row['active_at_height'] is None or any(value['result']=='nonreproducible' for value in related) else 'returned'
-        amount=int(row['amount'])
+        # The hold's account balance is the truth: the operator may have released part of it early.
+        cursor.execute('SELECT balance FROM accounts WHERE id=%s FOR UPDATE',(benchmarks.held(reservation_id),))
+        account=cursor.fetchone()
+        amount=int(account['balance']) if account else 0
         destination=members.available(row['member_id']) if outcome=='returned' else ledger.account(cursor,pot(round_number),'round')
         journal_id=None
         if amount:
