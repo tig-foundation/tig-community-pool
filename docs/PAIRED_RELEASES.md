@@ -43,8 +43,8 @@ configuring release metadata does not enable member funds, work or settlement.
 {
   "manifest_version": 1,
   "api_version": "2.0",
-  "pool": {"repository": "https://github.com/Daniel-T-S-Adams/community-pool.git", "commit": "<40 hex characters>", "tag": "<tested pool tag>"},
-  "worker": {"repository": "https://github.com/Daniel-T-S-Adams/community-pool-worker.git", "commit": "<40 hex characters>", "tag": "<tested worker tag>", "state_version": 1, "installer_sha256": "<64 hex characters>"},
+  "pool": {"repository": "https://github.com/tig-foundation/tig-community-pool.git", "commit": "<40 hex characters>", "tag": "<tested pool tag>"},
+  "worker": {"repository": "https://github.com/tig-foundation/tig-community-pool-worker.git", "commit": "<40 hex characters>", "tag": "<tested worker tag>", "state_version": 1, "installer_sha256": "<64 hex characters>"},
   "runtime_version": "0.0.8"
 }
 ```
@@ -80,9 +80,11 @@ checked before an installed worker can request work.
 The worker installer verifies that its own bytes match the current manifest,
 and that the fetched worker tag resolves to the full recorded commit. It fetches
 that tag from the repository the manifest names, so a release with a new worker
-pair must publish the tag there (today the former repository listed in
-[ROADMAP.md](ROADMAP.md)), or every member update stops with "installation
-command failed: git". It also checks the installer inside that checkout. Restarts use the installed detached
+pair must publish the tag in `tig-foundation/tig-community-pool-worker`, or
+every member update stops with "installation command failed: git". An
+installation made before the repositories moved recorded the former
+`Daniel-T-S-Adams` addresses; its next update still reads that record, then
+installs from `tig-foundation` and records the new address. It also checks the installer inside that checkout. Restarts use the installed detached
 revision and make no Git network requests. Explicit updates preserve the
 member's configuration, token and all saved benchmark evidence. They require
 the worker to stop and SQLite requests to finish; they do not discard unresolved
